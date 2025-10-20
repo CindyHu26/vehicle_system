@@ -10,3 +10,5 @@ __pycache__/
 # 排除 IDE/編輯器 設定檔 (選用，但建議)
 .vscode/
 .idea/
+
+.env
