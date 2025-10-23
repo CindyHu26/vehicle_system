@@ -551,3 +551,60 @@ class Violation(Base):
     vehicle = relationship("Vehicle", back_populates="violations")
     driver = relationship("Employee", back_populates="violations") # 關聯到駕駛 (員工)
     ticket_document = relationship("VehicleDocument")
+
+# --- 不可竄改稽核軌跡 ---
+class AuditLog(Base):
+    """
+    5.5 不可竄改稽核軌跡 (audit_logs)
+    記錄 CUD (Create, Update, Delete) 操作
+    """
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # 規格書 5.5: actor_id (誰做的)
+    # nullable=True 允許系統自動觸發 (e.g., 排程) 或在驗證前
+    actor_id = Column(Integer, ForeignKey("employees.id"), nullable=True, index=True)
+    
+    ts = Column(DateTime(timezone=True), server_default=func.now(), index=True, comment="操作時間")
+    
+    # 規格書 5.5: action, entity, entity_id
+    action = Column(String(50), nullable=False, index=True, comment="動作 (e.g., CREATE, UPDATE, DELETE)")
+    entity = Column(String(100), nullable=False, index=True, comment="實體 (e.g., Vehicle, Violation)")
+    entity_id = Column(Integer, nullable=False, index=True, comment="實體 ID")
+    
+    # 規格書 5.5: 雜湊值 (我們先簡化，儲存 JSON)
+    old_value = Column(JSONB, nullable=True, comment="舊值 (JSON)")
+    new_value = Column(JSONB, nullable=True, comment="新值 (JSON)")
+    
+    # 規格書 5.5: ip, ua (User-Agent)
+    ip_address = Column(String(100), nullable=True)
+    user_agent = Column(String(512), nullable=True)
+
+    # --- 關聯 ---
+    actor = relationship("Employee")
+
+
+# --- 敏感資料存取紀錄 ---
+class PrivacyAccessLog(Base):
+    """
+    5.5 敏感資料存取紀錄 (privacy_access_logs)
+    記錄 R (Read) 操作
+    """
+    __tablename__ = "privacy_access_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    actor_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    ts = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    
+    # 規格書 5.5: resource, resource_id
+    resource = Column(String(255), nullable=False, index=True, comment="存取的資源 (e.g., Employee.license_class)")
+    resource_id = Column(Integer, nullable=False, index=True, comment="資源 ID")
+    
+    reason = Column(Text, nullable=True, comment="存取原因 (e.g., 稽核罰單)")
+    
+    ip_address = Column(String(100), nullable=True)
+
+    # --- 關聯 ---
+    actor = relationship("Employee")

@@ -1,7 +1,7 @@
 # 檔案名稱: schemas.py
 from pydantic import BaseModel, ConfigDict
 from datetime import date, datetime
-from typing import List, Optional
+from typing import List, Optional, Any
 from decimal import Decimal
 
 # 匯入我們在 models.py 中定義的 Enum
@@ -318,4 +318,32 @@ class Vehicle(VehicleBase):
 
     reservations: List[Reservation] = [] # 這台車的所有預約
     trips: List[Trip] = []               # 這台車的所有行程
+    model_config = ConfigDict(from_attributes=True)
+
+# --- AuditLog Schemas ---
+class AuditLog(BaseModel):
+    id: int
+    actor_id: int | None
+    ts: datetime
+    action: str
+    entity: str
+    entity_id: int
+    old_value: Any | None = None # 對應 JSONB
+    new_value: Any | None = None # 對應 JSONB
+    ip_address: str | None
+    # 巢狀回傳簡易的操作者資訊
+    actor: Optional[EmployeeBase] = None # 使用 EmployeeBase 避免過多資訊
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --- PrivacyAccessLog Schemas ---
+class PrivacyAccessLog(BaseModel):
+    id: int
+    actor_id: int
+    ts: datetime
+    resource: str
+    resource_id: int
+    reason: str | None
+    ip_address: str | None
+    actor: Optional[EmployeeBase] = None
     model_config = ConfigDict(from_attributes=True)

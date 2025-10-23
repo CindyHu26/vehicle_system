@@ -2,7 +2,12 @@
 from sqlalchemy.orm import Session, joinedload, subqueryload
 import models
 import schemas
-from datetime import datetime
+from datetime import datetime, date
+from decimal import Decimal
+# json 模組用於序列化
+import json
+from pydantic import BaseModel
+from decimal import Decimal
 
 # --- Employee CRUD ---
 def get_employee(db: Session, employee_id: int):
@@ -262,7 +267,6 @@ def get_taxes_fees_for_vehicle(db: Session, vehicle_id: int):
 
 
 # --- Inspection CRUD ---
-
 def create_inspection(db: Session, inspection: schemas.InspectionCreate):
     """ (C) 建立新檢驗紀錄 """
     db_vehicle = get_vehicle(db, inspection.vehicle_id)
@@ -293,10 +297,73 @@ def get_inspections_for_vehicle(db: Session, vehicle_id: int):
         joinedload(models.Inspection.inspector)
     ).filter(models.Inspection.vehicle_id == vehicle_id).all()
 
+# --- AuditLog Helper ---
+def create_audit_log(
+    db: Session,
+    actor_id: int,
+    action: str,
+    entity: str,
+    entity_id: int,
+    old_value: BaseModel | models.Base | None = None,
+    new_value: BaseModel | models.Base | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None
+):
+    """
+    (Helper) 建立一筆稽核軌跡
+    """
+    
+    def serialize_value(value):
+        """ 將 Pydantic or SQLAlchemy 物件轉為字典 """
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json")
+        if isinstance(value, models.Base):
+            # 簡易轉換 (僅限欄位)
+            # 警告: 這不會轉換 relationship
+            data = {c.name: getattr(value, c.name) for c in value.__table__.columns}
+            # 手動轉日期/Decimal (因為 json.dumps 不支援)
+            for k, v in data.items():
+                if isinstance(v, (datetime, date)):
+                    data[k] = v.isoformat()
+                if isinstance(v, Decimal):
+                    data[k] = str(v)
+            return data
+        return None
+
+    try:
+        db_log = models.AuditLog(
+            actor_id=actor_id,
+            action=action,
+            entity=entity,
+            entity_id=entity_id,
+            old_value=serialize_value(old_value),
+            new_value=serialize_value(new_value),
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+        db.add(db_log)
+        # 注意：我們在這裡不 'commit'，
+        # 讓呼叫者 (e.g., create_violation) 決定何時 commit
+        # 確保 log 和操作在同一個 transaction
+        return db_log
+    except Exception as e:
+        print(f"寫入 Audit Log 失敗: {e}")
+        # 不應讓 Log 失敗導致主操作失敗，但要記錄
+        return None
+
+def get_audit_logs(db: Session, skip: int = 0, limit: int = 100):
+    """ (R) 查詢稽核軌跡 (含操作者資訊) """
+    return db.query(models.AuditLog).options(
+        joinedload(models.AuditLog.actor) # 載入操作者
+    ).order_by(models.AuditLog.ts.desc()) \
+     .offset(skip).limit(limit).all()
 
 # --- Violation CRUD ---
-
-def create_violation(db: Session, violation: schemas.ViolationCreate):
+def create_violation(
+    db: Session, 
+    violation: schemas.ViolationCreate,
+    actor_id: int # (!!! 新增 actor_id 參數 !!!)
+):
     """ (C) 建立新違規紀錄 """
     db_vehicle = get_vehicle(db, violation.vehicle_id)
     if not db_vehicle:
@@ -308,9 +375,39 @@ def create_violation(db: Session, violation: schemas.ViolationCreate):
             
     db_violation = models.Violation(**violation.model_dump())
     db.add(db_violation)
-    db.commit()
-    db.refresh(db_violation)
-    return db_violation
+    
+    # (!!! 新增) 寫入 Audit Log
+    # 我們在 commit 之前先呼叫 helper，它會被 add 到 session
+    create_audit_log(
+        db=db,
+        actor_id=actor_id,
+        action="CREATE",
+        entity="Violation",
+        entity_id=0, # 我們還不知道 ID，所以先放 0
+        new_value=violation # Pydantic schema
+    )
+    
+    try:
+        db.commit() # <--- 主要操作和 Log 在這裡一起 commit
+        db.refresh(db_violation)
+        
+        # (!!! 新增) Commit 之後，更新 Log 的 entity_id
+        # 找到剛才那筆 Log (用 ts + actor_id + entity_id=0)
+        log_entry = db.query(models.AuditLog).filter(
+            models.AuditLog.actor_id == actor_id,
+            models.AuditLog.entity == "Violation",
+            models.AuditLog.entity_id == 0
+        ).order_by(models.AuditLog.ts.desc()).first()
+        
+        if log_entry:
+            log_entry.entity_id = db_violation.id
+            db.commit() # 再次 commit
+            
+        return db_violation
+        
+    except Exception as e:
+        db.rollback() # 如果出錯，主操作和 Log 一起回滾
+        raise e
 
 def get_violation(db: Session, violation_id: int):
     """ (R) 查詢單一違規 """
@@ -328,8 +425,7 @@ def get_violations_for_driver(db: Session, driver_id: int):
              .filter(models.Violation.driver_id == driver_id)\
              .all()
 
-# --- (新增) Reservation CRUD ---
-
+# --- Reservation CRUD ---
 def create_reservation(db: Session, reservation: schemas.ReservationCreate):
     """ (C) 建立新預約申請 """
     # 檢查申請人是否存在
@@ -399,8 +495,7 @@ def get_reservations(db: Session, skip: int = 0, limit: int = 100):
     ).offset(skip).limit(limit).all()
 
 
-# --- (新增) Trip CRUD ---
-
+# --- Trip CRUD ---
 def create_trip_for_reservation(
     db: Session, 
     trip: schemas.TripCreate, 
@@ -437,3 +532,4 @@ def create_trip_for_reservation(
     db.commit()
     db.refresh(db_trip)
     return db_trip
+

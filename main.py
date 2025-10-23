@@ -1,5 +1,5 @@
 # 檔案名稱: main.py
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -7,6 +7,7 @@ import crud
 import models
 import schemas
 from database import SessionLocal, engine
+from dependencies import get_db, get_current_actor_id
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -54,16 +55,43 @@ def read_employee_api(employee_id: int, db: Session = Depends(get_db)):
 
 
 # --- Vehicles API (!!! 修改 !!!) ---
-@app.post("/api/v1/vehicles/", response_model=schemas.Vehicle, summary="建立新車輛")
-def create_vehicle_api(vehicle: schemas.VehicleCreate, db: Session = Depends(get_db)):
-    db_vehicle = crud.get_vehicle_by_plate_no(db, plate_no=vehicle.plate_no)
-    if db_vehicle:
-        raise HTTPException(status_code=400, detail=f"車牌號碼 {vehicle.plate_no} 已存在")
+@app.post("/api/v1/violations/", 
+          response_model=schemas.Violation, 
+          summary="建立新違規紀錄")
+def create_violation_api(
+    violation: schemas.ViolationCreate, 
+    # (!!! 修改 !!!) 
+    # 我們不再依賴 main.py 的 get_db，改用 dependencies.py 的
+    db: Session = Depends(get_db), 
+    # (!!! 新增 !!!) 
+    # 自動從依賴取得 actor_id，並從 Request 取得 IP
+    actor_id: int = Depends(get_current_actor_id),
+    request: Request = None 
+):
+    """
+    建立一筆交通違規紀錄 (罰單)。
+    - **vehicle_id**: 必須指定
+    - **driver_id**: (選填) 違規駕駛 (員工 ID)
+    - **points**: (選填) 駕駛積點
     
-    # crud.get_vehicle 會載入所有關聯 (包含空的 reservations)
-    new_vehicle = crud.create_vehicle(db=db, vehicle=vehicle)
-    return crud.get_vehicle(db, vehicle_id=new_vehicle.id)
-
+    (此 API 現在會自動記錄 Audit Log)
+    """
+    try:
+        # (!!! 修改 !!!) 將 actor_id 傳入 crud
+        return crud.create_violation(
+            db=db, 
+            violation=violation, 
+            actor_id=actor_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    # (!!! 補充 !!!)
+    # 我們還沒有傳遞 IP 和 User-Agent
+    # 完整的 crud.create_audit_log 呼叫應該是：
+    # ip = request.client.host if request else None
+    # ua = request.headers.get("user-agent") if request else None
+    # (這需要修改 crud.create_violation 函式簽名，我們先簡化)
 
 @app.get("/api/v1/vehicles/", response_model=List[schemas.Vehicle], summary="查詢車輛列表")
 def read_vehicles_api(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
@@ -512,3 +540,19 @@ def create_trip_api(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    
+# --- AuditLogs API ---
+@app.get("/api/v1/audit-logs/", 
+         response_model=List[schemas.AuditLog],
+         summary="查詢稽核軌跡 (Audit Log)")
+def read_audit_logs_api(
+    skip: int = 0, 
+    limit: int = 25, # Log 預設筆數少一點
+    db: Session = Depends(get_db)
+):
+    """
+    查詢系統的變動紀錄 (CUD)。
+    (此為高權限 API，未來應限制僅 '系統管理員' 或 '稽核' 角色可存取)
+    """
+    logs = crud.get_audit_logs(db, skip=skip, limit=limit)
+    return logs
