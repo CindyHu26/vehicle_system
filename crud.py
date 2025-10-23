@@ -2,7 +2,7 @@
 from sqlalchemy.orm import Session, joinedload, subqueryload
 import models
 import schemas
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal
 # json 模組用於序列化
 import json
@@ -533,3 +533,47 @@ def create_trip_for_reservation(
     db.refresh(db_trip)
     return db_trip
 
+# --- Scheduler CRUD ---
+
+def get_items_expiring_soon(db: Session, days_ahead: int = 30):
+    """
+    (排程器專用) 查詢在 X 天內即將到期的項目
+    - 規格書 4.9: 到期提醒
+    """
+    
+    # 取得今天的日期
+    today = datetime.now(timezone.utc).date()
+    target_date = today + timedelta(days=days_ahead)
+    # 1. 查詢即將到期的「保險」
+    expiring_insurances = db.query(models.Insurance).options(
+        joinedload(models.Insurance.vehicle) # 載入車輛資訊
+    ).filter(
+        models.Insurance.expires_on >= today,
+        models.Insurance.expires_on <= target_date
+    ).all()
+    
+    # 2. 查詢即將到期的「(四輪)定檢」
+    expiring_inspections = db.query(models.Inspection).options(
+        joinedload(models.Inspection.vehicle)
+    ).filter(
+        models.Inspection.inspection_type == models.InspectionTypeEnum.periodic,
+        models.Inspection.next_due_date >= today,
+        models.Inspection.next_due_date <= target_date
+    ).all()
+
+    # 3. 查詢即將到期的「(機車)排氣定檢」
+    expiring_emissions = db.query(models.Inspection).options(
+        joinedload(models.Inspection.vehicle)
+    ).filter(
+        models.Inspection.inspection_type == models.InspectionTypeEnum.emission,
+        models.Inspection.next_due_date >= today,
+        models.Inspection.next_due_date <= target_date
+    ).all()
+    
+    # (未來可擴充：保養計畫、合約等)
+
+    return {
+        "insurances": expiring_insurances,
+        "inspections": expiring_inspections,
+        "emissions": expiring_emissions
+    }

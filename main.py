@@ -9,13 +9,41 @@ import schemas
 from database import SessionLocal, engine
 from dependencies import get_db, get_current_actor_id
 
-models.Base.metadata.create_all(bind=engine)
+# 匯入排程器
+from scheduler import start_scheduler, stop_scheduler, check_upcoming_expirations_job
 
 app = FastAPI(
     title="公務車與機車管理系統 API",
     description="規格書 v0.2 實作",
     version="0.2.0"
 )
+
+# --- FastAPI 啟動與關閉事件 ---
+@app.on_event("startup")
+async def app_startup():
+    """
+    API 伺服器啟動時，執行此函式
+    """
+    print("應用程式啟動中...")
+    # 啟動背景排程器
+    start_scheduler()
+    
+    # (!!! 測試用 !!!)
+    # 為了立刻看到效果，我們在啟動時「手動」觸發一次任務
+    print("正在手動觸發一次 'check_upcoming_expirations_job'...")
+    check_upcoming_expirations_job()
+    
+
+@app.on_event("shutdown")
+async def app_shutdown():
+    """
+    API 伺服器關閉時 (e.g., Ctrl+C)，執行此函式
+    """
+    print("應用程式關閉中...")
+    # 安全關閉排程器
+    stop_scheduler()
+
+models.Base.metadata.create_all(bind=engine)
 
 # --- Dependency ---
 def get_db():
@@ -53,45 +81,6 @@ def read_employee_api(employee_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="找不到該員工")
     return db_employee
 
-
-# --- Vehicles API (!!! 修改 !!!) ---
-@app.post("/api/v1/violations/", 
-          response_model=schemas.Violation, 
-          summary="建立新違規紀錄")
-def create_violation_api(
-    violation: schemas.ViolationCreate, 
-    # (!!! 修改 !!!) 
-    # 我們不再依賴 main.py 的 get_db，改用 dependencies.py 的
-    db: Session = Depends(get_db), 
-    # (!!! 新增 !!!) 
-    # 自動從依賴取得 actor_id，並從 Request 取得 IP
-    actor_id: int = Depends(get_current_actor_id),
-    request: Request = None 
-):
-    """
-    建立一筆交通違規紀錄 (罰單)。
-    - **vehicle_id**: 必須指定
-    - **driver_id**: (選填) 違規駕駛 (員工 ID)
-    - **points**: (選填) 駕駛積點
-    
-    (此 API 現在會自動記錄 Audit Log)
-    """
-    try:
-        # (!!! 修改 !!!) 將 actor_id 傳入 crud
-        return crud.create_violation(
-            db=db, 
-            violation=violation, 
-            actor_id=actor_id
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-        
-    # (!!! 補充 !!!)
-    # 我們還沒有傳遞 IP 和 User-Agent
-    # 完整的 crud.create_audit_log 呼叫應該是：
-    # ip = request.client.host if request else None
-    # ua = request.headers.get("user-agent") if request else None
-    # (這需要修改 crud.create_violation 函式簽名，我們先簡化)
 
 @app.get("/api/v1/vehicles/", response_model=List[schemas.Vehicle], summary="查詢車輛列表")
 def read_vehicles_api(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
@@ -411,28 +400,45 @@ def read_vehicle_inspections_api(
 
 
 # --- Violations API ---
-
+# --- Vehicles API (!!! 修改 !!!) ---
 @app.post("/api/v1/violations/", 
           response_model=schemas.Violation, 
           summary="建立新違規紀錄")
 def create_violation_api(
     violation: schemas.ViolationCreate, 
-    db: Session = Depends(get_db)
+    # (!!! 修改 !!!) 
+    # 我們不再依賴 main.py 的 get_db，改用 dependencies.py 的
+    db: Session = Depends(get_db), 
+    # (!!! 新增 !!!) 
+    # 自動從依賴取得 actor_id，並從 Request 取得 IP
+    actor_id: int = Depends(get_current_actor_id),
+    request: Request = None 
 ):
     """
     建立一筆交通違規紀錄 (罰單)。
     - **vehicle_id**: 必須指定
     - **driver_id**: (選填) 違規駕駛 (員工 ID)
     - **points**: (選填) 駕駛積點
+    
+    (此 API 現在會自動記錄 Audit Log)
     """
     try:
-        return crud.create_violation(db=db, violation=violation)
+        # (!!! 修改 !!!) 將 actor_id 傳入 crud
+        return crud.create_violation(
+            db=db, 
+            violation=violation, 
+            actor_id=actor_id
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+        
+    # (!!! 補充 !!!)
+    # 我們還沒有傳遞 IP 和 User-Agent
+    # 完整的 crud.create_audit_log 呼叫應該是：
+    # ip = request.client.host if request else None
+    # ua = request.headers.get("user-agent") if request else None
+    # (這需要修改 crud.create_violation 函式簽名，我們先簡化)
 
-@app.get("/api/v1/vehicles/{vehicle_id}/violations/", 
-         response_model=List[schemas.Violation],
-         summary="查詢特定車輛的所有違規")
 def read_vehicle_violations_api(
     vehicle_id: int, 
     db: Session = Depends(get_db)
@@ -457,7 +463,6 @@ def read_driver_violations_api(
     return crud.get_violations_for_driver(db=db, driver_id=employee_id)
 
 # --- Reservations API ---
-
 @app.post("/api/v1/reservations/", 
           response_model=schemas.Reservation, 
           summary="建立新借車申請 (預約)")
