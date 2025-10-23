@@ -6,6 +6,7 @@ from sqlalchemy.ext.declarative import declarative_base
 import os
 from dotenv import load_dotenv
 
+load_dotenv()
 # 程式碼從 os.getenv() 讀取環境變數，而不是寫死
 DATABASE_URL = os.getenv("DATABASE_URL")
 

@@ -162,3 +162,124 @@ def read_assets_api(
     """
     assets = crud.get_assets(db, skip=skip, limit=limit)
     return assets
+
+# --- (新增) Vendors API ---
+
+@app.post("/api/v1/vendors/", 
+          response_model=schemas.Vendor, 
+          summary="建立新供應商")
+def create_vendor_api(
+    vendor: schemas.VendorCreate, 
+    db: Session = Depends(get_db)
+):
+    """
+    建立新供應商 (維修廠、保險公司等)。
+    """
+    return crud.create_vendor(db=db, vendor=vendor)
+
+
+@app.get("/api/v1/vendors/", 
+         response_model=List[schemas.Vendor], 
+         summary="查詢供應商列表")
+def read_vendors_api(
+    skip: int = 0, 
+    limit: int = 100, 
+    db: Session = Depends(get_db)
+):
+    """
+    查詢供應商列表 (分頁)。
+    """
+    return crud.get_vendors(db, skip=skip, limit=limit)
+
+
+# --- (新增) MaintenancePlans API ---
+
+@app.post("/api/v1/vehicles/{vehicle_id}/maintenance-plans/", 
+          response_model=schemas.MaintenancePlan, 
+          summary="為車輛建立保養計畫")
+def create_maintenance_plan_api(
+    vehicle_id: int, 
+    plan: schemas.MaintenancePlanCreate, 
+    db: Session = Depends(get_db)
+):
+    """
+    為指定的車輛 ID 建立一個保養計畫 (e.g., 每 5000km 保養)。
+    """
+    # 先確認車輛存在
+    db_vehicle = crud.get_vehicle(db, vehicle_id=vehicle_id)
+    if db_vehicle is None:
+        raise HTTPException(status_code=404, detail="找不到該車輛")
+        
+    return crud.create_maintenance_plan_for_vehicle(db=db, plan=plan, vehicle_id=vehicle_id)
+
+
+@app.get("/api/v1/vehicles/{vehicle_id}/maintenance-plans/", 
+         response_model=List[schemas.MaintenancePlan],
+         summary="查詢特定車輛的保養計畫")
+def read_maintenance_plans_api(
+    vehicle_id: int, 
+    db: Session = Depends(get_db)
+):
+    """
+    取得指定車輛 ID 的所有保養計畫清單。
+    """
+    db_vehicle = crud.get_vehicle(db, vehicle_id=vehicle_id)
+    if db_vehicle is None:
+        raise HTTPException(status_code=404, detail="找不到該車輛")
+        
+    return crud.get_maintenance_plans_for_vehicle(db=db, vehicle_id=vehicle_id)
+
+
+# --- (新增) WorkOrders API ---
+
+@app.post("/api/v1/work-orders/", 
+          response_model=schemas.WorkOrder, 
+          summary="建立新工單")
+def create_work_order_api(
+    work_order: schemas.WorkOrderCreate, 
+    db: Session = Depends(get_db)
+):
+    """
+    建立一筆新的工單 (保養、維修、定檢等)。
+    - **vehicle_id**: 必須指定要維修的車輛 ID
+    - **vendor_id**: (選填) 執行工單的供應商 ID
+    """
+    try:
+        new_order = crud.create_work_order(db=db, work_order=work_order)
+        # 重新查詢以載入 vendor 資訊
+        return crud.get_work_order(db, work_order_id=new_order.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/work-orders/{work_order_id}", 
+         response_model=schemas.WorkOrder,
+         summary="查詢單一工單")
+def read_work_order_api(
+    work_order_id: int, 
+    db: Session = Depends(get_db)
+):
+    """
+    依據 ID 查詢單一工單，會一併回傳供應商資訊。
+    """
+    db_work_order = crud.get_work_order(db, work_order_id=work_order_id)
+    if db_work_order is None:
+        raise HTTPException(status_code=404, detail="找不到該工單")
+    return db_work_order
+
+
+@app.get("/api/v1/vehicles/{vehicle_id}/work-orders/", 
+         response_model=List[schemas.WorkOrder],
+         summary="查詢特定車輛的所有工單")
+def read_vehicle_work_orders_api(
+    vehicle_id: int, 
+    db: Session = Depends(get_db)
+):
+    """
+    取得指定車輛 ID 的所有工單清單。
+    """
+    db_vehicle = crud.get_vehicle(db, vehicle_id=vehicle_id)
+    if db_vehicle is None:
+        raise HTTPException(status_code=404, detail="找不到該車輛")
+        
+    return crud.get_work_orders_for_vehicle(db=db, vehicle_id=vehicle_id)
