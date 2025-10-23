@@ -1,15 +1,21 @@
 # 檔案名稱: crud.py
-from sqlalchemy.orm import Session, joinedload # <-- (新增) joinedload
+from sqlalchemy.orm import Session, joinedload # <-- joinedload
 import models
 import schemas
 
 # --- Employee CRUD ---
 def get_employee(db: Session, employee_id: int):
-    return db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+    """ (R) 依據 ID 查詢單一員工 (!!! 修改 !!!) """
+    return db.query(models.Employee).options(
+        joinedload(models.Employee.violations) # 載入違規紀錄
+    ).filter(models.Employee.id == employee_id).first()
 def get_employee_by_emp_no(db: Session, emp_no: str):
     return db.query(models.Employee).filter(models.Employee.emp_no == emp_no).first()
 def get_employees(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(models.Employee).offset(skip).limit(limit).all()
+    """ (R) 查詢多筆員工 (分頁) (!!! 修改 !!!) """
+    return db.query(models.Employee).options(
+        joinedload(models.Employee.violations) # 載入違規紀錄
+    ).offset(skip).limit(limit).all()
 def create_employee(db: Session, employee: schemas.EmployeeCreate):
     db_employee = models.Employee(**employee.model_dump())
     db.add(db_employee)
@@ -26,7 +32,11 @@ def get_vehicle(db: Session, vehicle_id: int):
         joinedload(models.Vehicle.documents),         # 載入文件
         joinedload(models.Vehicle.assets),            # 載入備品
         joinedload(models.Vehicle.maintenance_plans), # 載入保養計畫
-        joinedload(models.Vehicle.work_orders)        # 載入工單
+        joinedload(models.Vehicle.work_orders),        # 載入工單
+        joinedload(models.Vehicle.insurances),         # 加入合規性關聯
+        joinedload(models.Vehicle.taxes_fees),
+        joinedload(models.Vehicle.inspections),
+        joinedload(models.Vehicle.violations)
     ).filter(models.Vehicle.id == vehicle_id).first()
 
 def get_vehicle_by_plate_no(db: Session, plate_no: str):
@@ -43,7 +53,11 @@ def get_vehicles(db: Session, skip: int = 0, limit: int = 100):
         joinedload(models.Vehicle.documents), # 載入文件
         joinedload(models.Vehicle.assets),    # 載入備品
         joinedload(models.Vehicle.maintenance_plans),
-        joinedload(models.Vehicle.work_orders)
+        joinedload(models.Vehicle.work_orders),
+        joinedload(models.Vehicle.insurances),
+        joinedload(models.Vehicle.taxes_fees),
+        joinedload(models.Vehicle.inspections),
+        joinedload(models.Vehicle.violations)
     ).offset(skip).limit(limit).all()
 
 def create_vehicle(db: Session, vehicle: schemas.VehicleCreate):
@@ -177,3 +191,126 @@ def get_work_orders_for_vehicle(db: Session, vehicle_id: int):
     return db.query(models.WorkOrder).options(
         joinedload(models.WorkOrder.vendor)
     ).filter(models.WorkOrder.vehicle_id == vehicle_id).all()
+
+# --- Insurance CRUD ---
+
+def create_insurance(db: Session, insurance: schemas.InsuranceCreate):
+    """ (C) 建立新保險紀錄 """
+    # 檢查關聯的 vehicle_id
+    db_vehicle = get_vehicle(db, insurance.vehicle_id)
+    if not db_vehicle:
+        raise ValueError(f"ID 為 {insurance.vehicle_id} 的車輛不存在")
+    # 檢查關聯的 insurer_id (供應商)
+    if insurance.insurer_id:
+        db_vendor = get_vendor(db, insurance.insurer_id)
+        if not db_vendor:
+            raise ValueError(f"ID 為 {insurance.insurer_id} 的供應商不存在")
+        if db_vendor.category != models.VendorCategoryEnum.insurance:
+            raise ValueError(f"供應商 {db_vendor.name} 不是保險公司")
+            
+    db_insurance = models.Insurance(**insurance.model_dump())
+    db.add(db_insurance)
+    db.commit()
+    db.refresh(db_insurance)
+    return db_insurance
+
+def get_insurance(db: Session, insurance_id: int):
+    """ (R) 查詢單一保險 (並載入保險公司資訊) """
+    return db.query(models.Insurance).options(
+        joinedload(models.Insurance.insurer)
+    ).filter(models.Insurance.id == insurance_id).first()
+
+def get_insurances_for_vehicle(db: Session, vehicle_id: int):
+    """ (R) 查詢特定車輛的所有保險 """
+    return db.query(models.Insurance).options(
+        joinedload(models.Insurance.insurer)
+    ).filter(models.Insurance.vehicle_id == vehicle_id).all()
+
+
+# --- TaxFee CRUD ---
+
+def create_tax_fee(db: Session, tax_fee: schemas.TaxFeeCreate):
+    """ (C) 建立新稅費紀錄 """
+    db_vehicle = get_vehicle(db, tax_fee.vehicle_id)
+    if not db_vehicle:
+        raise ValueError(f"ID 為 {tax_fee.vehicle_id} 的車輛不存在")
+        
+    db_tax_fee = models.TaxFee(**tax_fee.model_dump())
+    db.add(db_tax_fee)
+    db.commit()
+    db.refresh(db_tax_fee)
+    return db_tax_fee
+
+def get_taxes_fees_for_vehicle(db: Session, vehicle_id: int):
+    """ (R) 查詢特定車輛的所有稅費 """
+    return db.query(models.TaxFee)\
+             .filter(models.TaxFee.vehicle_id == vehicle_id)\
+             .all()
+
+
+# --- Inspection CRUD ---
+
+def create_inspection(db: Session, inspection: schemas.InspectionCreate):
+    """ (C) 建立新檢驗紀錄 """
+    db_vehicle = get_vehicle(db, inspection.vehicle_id)
+    if not db_vehicle:
+        raise ValueError(f"ID 為 {inspection.vehicle_id} 的車輛不存在")
+    if inspection.inspector_id:
+        db_vendor = get_vendor(db, inspection.inspector_id)
+        if not db_vendor:
+            raise ValueError(f"ID 為 {inspection.inspector_id} 的供應商不存在")
+        if db_vendor.category not in (models.VendorCategoryEnum.inspection, models.VendorCategoryEnum.emission_check):
+             raise ValueError(f"供應商 {db_vendor.name} 不是檢驗站")
+             
+    db_inspection = models.Inspection(**inspection.model_dump())
+    db.add(db_inspection)
+    db.commit()
+    db.refresh(db_inspection)
+    return db_inspection
+
+def get_inspection(db: Session, inspection_id: int):
+    """ (R) 查詢單一檢驗 (並載入檢驗站資訊) """
+    return db.query(models.Inspection).options(
+        joinedload(models.Inspection.inspector)
+    ).filter(models.Inspection.id == inspection_id).first()
+
+def get_inspections_for_vehicle(db: Session, vehicle_id: int):
+    """ (R) 查詢特定車輛的所有檢驗 """
+    return db.query(models.Inspection).options(
+        joinedload(models.Inspection.inspector)
+    ).filter(models.Inspection.vehicle_id == vehicle_id).all()
+
+
+# --- Violation CRUD ---
+
+def create_violation(db: Session, violation: schemas.ViolationCreate):
+    """ (C) 建立新違規紀錄 """
+    db_vehicle = get_vehicle(db, violation.vehicle_id)
+    if not db_vehicle:
+        raise ValueError(f"ID 為 {violation.vehicle_id} 的車輛不存在")
+    if violation.driver_id:
+        db_driver = get_employee(db, violation.driver_id)
+        if not db_driver:
+            raise ValueError(f"ID 為 {violation.driver_id} 的員工不存在")
+            
+    db_violation = models.Violation(**violation.model_dump())
+    db.add(db_violation)
+    db.commit()
+    db.refresh(db_violation)
+    return db_violation
+
+def get_violation(db: Session, violation_id: int):
+    """ (R) 查詢單一違規 """
+    return db.query(models.Violation).filter(models.Violation.id == violation_id).first()
+
+def get_violations_for_vehicle(db: Session, vehicle_id: int):
+    """ (R) 查詢特定車輛的所有違規 """
+    return db.query(models.Violation)\
+             .filter(models.Violation.vehicle_id == vehicle_id)\
+             .all()
+
+def get_violations_for_driver(db: Session, driver_id: int):
+    """ (R) 查詢特定駕駛的所有違規 """
+    return db.query(models.Violation)\
+             .filter(models.Violation.driver_id == driver_id)\
+             .all()

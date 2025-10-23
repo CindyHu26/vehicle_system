@@ -8,8 +8,30 @@ from decimal import Decimal
 from models import (
     VehicleTypeEnum, VehicleStatusEnum, EmployeeStatusEnum,
     DocumentTypeEnum, AssetTypeEnum, AssetStatusEnum,
-    VendorCategoryEnum, WorkOrderTypeEnum, WorkOrderStatusEnum
+    VendorCategoryEnum, WorkOrderTypeEnum, WorkOrderStatusEnum,
+    InsurancePolicyTypeEnum, FeeTypeEnum, InspectionTypeEnum, 
+    InspectionResultEnum, ViolationStatusEnum
 )
+
+class ViolationBase(BaseModel):
+    vehicle_id: int
+    driver_id: int | None = None
+    law_ref: str | None = None
+    violation_date: datetime
+    amount: Decimal
+    points: int = 0
+    paid_on: date | None = None
+    ticket_doc_id: int | None = None
+    status: ViolationStatusEnum = ViolationStatusEnum.open
+
+class ViolationCreate(ViolationBase):
+    pass
+
+class Violation(ViolationBase):
+    id: int
+    created_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
 # --- Employee Schemas ---
 class EmployeeBase(BaseModel):
@@ -26,6 +48,7 @@ class Employee(EmployeeBase):
     id: int
     created_at: datetime
     updated_at: datetime | None = None
+    violations: List[Violation] = [] # 顯示該員工的違規紀錄
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -135,6 +158,75 @@ class WorkOrder(WorkOrderBase):
     
     model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True) # 允許 Decimal
 
+# --- Insurance Schemas ---
+
+class InsuranceBase(BaseModel):
+    vehicle_id: int
+    policy_type: InsurancePolicyTypeEnum
+    policy_no: str
+    insurer_id: int | None = None # 供應商 ID (保險公司)
+    coverage: str | None = None
+    effective_on: date
+    expires_on: date
+    premium: Decimal | None = None
+
+class InsuranceCreate(InsuranceBase):
+    pass
+
+class Insurance(InsuranceBase):
+    id: int
+    created_at: datetime
+    
+    # (選填) 巢狀回傳保險公司資訊
+    insurer: Optional[Vendor] = None 
+    
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
+
+
+# --- TaxFee Schemas ---
+
+class TaxFeeBase(BaseModel):
+    vehicle_id: int
+    fee_type: FeeTypeEnum
+    period_start: date
+    period_end: date
+    amount: Decimal
+    paid_on: date | None = None
+    evidence_doc_id: int | None = None
+
+class TaxFeeCreate(TaxFeeBase):
+    pass
+
+class TaxFee(TaxFeeBase):
+    id: int
+    created_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
+
+
+# --- Inspection Schemas ---
+
+class InspectionBase(BaseModel):
+    vehicle_id: int
+    inspection_type: InspectionTypeEnum
+    result: InspectionResultEnum = InspectionResultEnum.pending
+    inspection_date: date | None = None
+    next_due_date: date | None = None
+    inspector_id: int | None = None # 供應商 ID (檢驗站)
+    cert_doc_id: int | None = None
+
+class InspectionCreate(InspectionBase):
+    pass
+
+class Inspection(InspectionBase):
+    id: int
+    created_at: datetime
+    
+    # (選填) 巢狀回傳檢驗站資訊
+    inspector: Optional[Vendor] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
 class VehicleBase(BaseModel):
     plate_no: str
     vin: str | None = None
@@ -163,5 +255,9 @@ class Vehicle(VehicleBase):
     assets: List[VehicleAsset] = []
     maintenance_plans: List[MaintenancePlan] = [] 
     work_orders: List[WorkOrder] = []            
-    
+    insurances: List[Insurance] = [] # 保險
+    taxes_fees: List[TaxFee] = []     # 稅費
+    inspections: List[Inspection] = [] # 檢驗
+    violations: List[Violation] = []   # 違規
+        
     model_config = ConfigDict(from_attributes=True)

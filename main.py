@@ -26,65 +26,62 @@ def get_db():
 
 # --- API Endpoints (API 路由) ---
 
-# --- Employees API ---
-# ... (保持不變) ...
+# --- Employees API (!!! 修改 !!!) ---
 @app.post("/api/v1/employees/", response_model=schemas.Employee, summary="建立新員工")
 def create_employee_api(employee: schemas.EmployeeCreate, db: Session = Depends(get_db)):
     db_employee = crud.get_employee_by_emp_no(db, emp_no=employee.emp_no)
     if db_employee:
         raise HTTPException(status_code=400, detail=f"員工編號 {employee.emp_no} 已存在")
-    return crud.create_employee(db=db, employee=employee)
+    
+    # 建立完後，用 get_employee 重新查詢，以包含空的 violations 列表
+    new_emp = crud.create_employee(db=db, employee=employee)
+    return crud.get_employee(db, employee_id=new_emp.id)
+
 
 @app.get("/api/v1/employees/", response_model=List[schemas.Employee], summary="查詢員工列表")
 def read_employees_api(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    # crud.get_employees 現在會自動載入 violations
     employees = crud.get_employees(db, skip=skip, limit=limit)
     return employees
 
+
 @app.get("/api/v1/employees/{employee_id}", response_model=schemas.Employee, summary="查詢單一員工")
 def read_employee_api(employee_id: int, db: Session = Depends(get_db)):
+    # crud.get_employee 現在會自動載入 violations
     db_employee = crud.get_employee(db, employee_id=employee_id)
     if db_employee is None:
-        raise HTTPException(status_code=44, detail="找不到該員工")
+        raise HTTPException(status_code=404, detail="找不到該員工")
     return db_employee
 
 
-# --- Vehicles API ---
-# (注意：查詢車輛的 response_model 會自動更新，因為我們改了 schemas.Vehicle)
-
+# --- Vehicles API (!!! 修改 !!!) ---
 @app.post("/api/v1/vehicles/", response_model=schemas.Vehicle, summary="建立新車輛")
 def create_vehicle_api(vehicle: schemas.VehicleCreate, db: Session = Depends(get_db)):
     db_vehicle = crud.get_vehicle_by_plate_no(db, plate_no=vehicle.plate_no)
     if db_vehicle:
         raise HTTPException(status_code=400, detail=f"車牌號碼 {vehicle.plate_no} 已存在")
-    # 建立車輛 (crud.create_vehicle)
-    new_vehicle = crud.create_vehicle(db=db, vehicle=vehicle)
     
-    # (!!! 重要 !!!)
-    # 雖然車輛建立了，但 new_vehicle 物件是剛 refresh() 的，
-    # 它還沒有我們在 schema.Vehicle 中定義的 .documents 和 .assets 屬性
-    # (這些屬性是 []，是 Pydantic schema 層的預設值，不是 SQLAlchemy 載入的)
-    # 為了讓回傳的資料格式正確 (包含空的 documents 和 assets 列表)，
-    # 我們重新查詢一次，這次使用會 Eager Loading 的 get_vehicle
+    # crud.get_vehicle 會載入所有關聯 (包含空的合規列表)
+    new_vehicle = crud.create_vehicle(db=db, vehicle=vehicle)
     return crud.get_vehicle(db, vehicle_id=new_vehicle.id)
 
 
 @app.get("/api/v1/vehicles/", response_model=List[schemas.Vehicle], summary="查詢車輛列表")
 def read_vehicles_api(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    # crud.get_vehicles 現在會自動載入 documents 和 assets
+    # crud.get_vehicles 現在會自動載入所有關聯
     vehicles = crud.get_vehicles(db, skip=skip, limit=limit)
     return vehicles
 
 
 @app.get("/api/v1/vehicles/{vehicle_id}", response_model=schemas.Vehicle, summary="查詢單一車輛")
 def read_vehicle_api(vehicle_id: int, db: Session = Depends(get_db)):
-    # crud.get_vehicle 現在會自動載入 documents 和 assets
+    # crud.get_vehicle 現在會自動載入所有關聯
     db_vehicle = crud.get_vehicle(db, vehicle_id=vehicle_id)
     if db_vehicle is None:
         raise HTTPException(status_code=404, detail="找不到該車輛")
     return db_vehicle
 
-
-# --- (新增) Vehicle Documents API ---
+# --- Vehicle Documents API ---
 
 @app.post("/api/v1/vehicles/{vehicle_id}/documents/", 
           response_model=schemas.VehicleDocument, 
@@ -127,7 +124,7 @@ def read_vehicle_documents(
     return crud.get_vehicle_documents(db=db, vehicle_id=vehicle_id)
 
 
-# --- (新增) Vehicle Assets API ---
+# --- Vehicle Assets API ---
 
 @app.post("/api/v1/assets/", 
           response_model=schemas.VehicleAsset, 
@@ -163,7 +160,7 @@ def read_assets_api(
     assets = crud.get_assets(db, skip=skip, limit=limit)
     return assets
 
-# --- (新增) Vendors API ---
+# --- Vendors API ---
 
 @app.post("/api/v1/vendors/", 
           response_model=schemas.Vendor, 
@@ -192,7 +189,7 @@ def read_vendors_api(
     return crud.get_vendors(db, skip=skip, limit=limit)
 
 
-# --- (新增) MaintenancePlans API ---
+# --- MaintenancePlans API ---
 
 @app.post("/api/v1/vehicles/{vehicle_id}/maintenance-plans/", 
           response_model=schemas.MaintenancePlan, 
@@ -230,7 +227,7 @@ def read_maintenance_plans_api(
     return crud.get_maintenance_plans_for_vehicle(db=db, vehicle_id=vehicle_id)
 
 
-# --- (新增) WorkOrders API ---
+# --- WorkOrders API ---
 
 @app.post("/api/v1/work-orders/", 
           response_model=schemas.WorkOrder, 
@@ -283,3 +280,152 @@ def read_vehicle_work_orders_api(
         raise HTTPException(status_code=404, detail="找不到該車輛")
         
     return crud.get_work_orders_for_vehicle(db=db, vehicle_id=vehicle_id)
+
+# --- Insurances API ---
+
+@app.post("/api/v1/insurances/", 
+          response_model=schemas.Insurance, 
+          summary="建立新保險紀錄")
+def create_insurance_api(
+    insurance: schemas.InsuranceCreate, 
+    db: Session = Depends(get_db)
+):
+    """
+    為車輛建立一筆保險紀錄 (強制險或任意險)。
+    - **vehicle_id**: 必須指定
+    - **insurer_id**: (選填) 關聯到已建立的供應商 (保險公司)
+    """
+    try:
+        new_insurance = crud.create_insurance(db=db, insurance=insurance)
+        # 重新查詢以載入 insurer (保險公司) 資訊
+        return crud.get_insurance(db, insurance_id=new_insurance.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/v1/vehicles/{vehicle_id}/insurances/", 
+         response_model=List[schemas.Insurance],
+         summary="查詢特定車輛的所有保險")
+def read_vehicle_insurances_api(
+    vehicle_id: int, 
+    db: Session = Depends(get_db)
+):
+    """ 取得指定車輛 ID 的所有保險清單。 """
+    db_vehicle = crud.get_vehicle(db, vehicle_id=vehicle_id)
+    if db_vehicle is None:
+        raise HTTPException(status_code=404, detail="找不到該車輛")
+    return crud.get_insurances_for_vehicle(db=db, vehicle_id=vehicle_id)
+
+
+# --- TaxesFees API ---
+
+@app.post("/api/v1/taxes-fees/", 
+          response_model=schemas.TaxFee, 
+          summary="建立新稅費紀錄")
+def create_tax_fee_api(
+    tax_fee: schemas.TaxFeeCreate, 
+    db: Session = Depends(get_db)
+):
+    """
+    為車輛建立一筆稅費紀錄 (e.g., 2025年牌照稅)。
+    - **vehicle_id**: 必須指定
+    - **fee_type**: 'license_tax' (牌照稅) 或 'fuel_fee' (燃料費)
+    """
+    try:
+        return crud.create_tax_fee(db=db, tax_fee=tax_fee)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/v1/vehicles/{vehicle_id}/taxes-fees/", 
+         response_model=List[schemas.TaxFee],
+         summary="查詢特定車輛的所有稅費")
+def read_vehicle_taxes_fees_api(
+    vehicle_id: int, 
+    db: Session = Depends(get_db)
+):
+    """ 取得指定車輛 ID 的所有稅費 (牌照/燃料) 清單。 """
+    db_vehicle = crud.get_vehicle(db, vehicle_id=vehicle_id)
+    if db_vehicle is None:
+        raise HTTPException(status_code=404, detail="找不到該車輛")
+    return crud.get_taxes_fees_for_vehicle(db=db, vehicle_id=vehicle_id)
+
+
+# --- Inspections API ---
+
+@app.post("/api/v1/inspections/", 
+          response_model=schemas.Inspection, 
+          summary="建立新檢驗紀錄")
+def create_inspection_api(
+    inspection: schemas.InspectionCreate, 
+    db: Session = Depends(get_db)
+):
+    """
+    為車輛建立一筆檢驗紀錄 (定檢或排氣檢驗)。
+    - **vehicle_id**: 必須指定
+    - **inspection_type**: 'periodic' (定檢) 或 'emission' (排氣)
+    """
+    try:
+        new_inspection = crud.create_inspection(db=db, inspection=inspection)
+        # 重新查詢以載入 inspector (檢驗站) 資訊
+        return crud.get_inspection(db, inspection_id=new_inspection.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/v1/vehicles/{vehicle_id}/inspections/", 
+         response_model=List[schemas.Inspection],
+         summary="查詢特定車輛的所有檢驗")
+def read_vehicle_inspections_api(
+    vehicle_id: int, 
+    db: Session = Depends(get_db)
+):
+    """ 取得指定車輛 ID 的所有檢驗紀錄清單。 """
+    db_vehicle = crud.get_vehicle(db, vehicle_id=vehicle_id)
+    if db_vehicle is None:
+        raise HTTPException(status_code=404, detail="找不到該車輛")
+    return crud.get_inspections_for_vehicle(db=db, vehicle_id=vehicle_id)
+
+
+# --- Violations API ---
+
+@app.post("/api/v1/violations/", 
+          response_model=schemas.Violation, 
+          summary="建立新違規紀錄")
+def create_violation_api(
+    violation: schemas.ViolationCreate, 
+    db: Session = Depends(get_db)
+):
+    """
+    建立一筆交通違規紀錄 (罰單)。
+    - **vehicle_id**: 必須指定
+    - **driver_id**: (選填) 違規駕駛 (員工 ID)
+    - **points**: (選填) 駕駛積點
+    """
+    try:
+        return crud.create_violation(db=db, violation=violation)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/v1/vehicles/{vehicle_id}/violations/", 
+         response_model=List[schemas.Violation],
+         summary="查詢特定車輛的所有違規")
+def read_vehicle_violations_api(
+    vehicle_id: int, 
+    db: Session = Depends(get_db)
+):
+    """ 取得指定車輛 ID 的所有違規紀錄清單。 """
+    db_vehicle = crud.get_vehicle(db, vehicle_id=vehicle_id)
+    if db_vehicle is None:
+        raise HTTPException(status_code=404, detail="找不到該車輛")
+    return crud.get_violations_for_vehicle(db=db, vehicle_id=vehicle_id)
+
+@app.get("/api/v1/employees/{employee_id}/violations/", 
+         response_model=List[schemas.Violation],
+         summary="查詢特定駕駛的所有違規")
+def read_driver_violations_api(
+    employee_id: int, 
+    db: Session = Depends(get_db)
+):
+    """ 取得指定員工 ID 的所有違規紀錄清單 (用於計算積點)。 """
+    db_driver = crud.get_employee(db, employee_id=employee_id)
+    if db_driver is None:
+        raise HTTPException(status_code=404, detail="找不到該員工")
+    return crud.get_violations_for_driver(db=db, driver_id=employee_id)

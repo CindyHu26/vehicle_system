@@ -77,6 +77,34 @@ class WorkOrderStatusEnum(str, enum.Enum):
     billed = "billed"               # 待對帳
     closed = "closed"               # 結案
 
+class InsurancePolicyTypeEnum(str, enum.Enum):
+    CALI = "CALI"               # 強制汽車責任保險
+    voluntary = "voluntary"     # 任意險
+    other = "other"
+
+class FeeTypeEnum(str, enum.Enum):
+    license_tax = "license_tax" # 牌照稅
+    fuel_fee = "fuel_fee"       # 燃料費
+    parking_fee = "parking_fee" # 停車費 (月租等)
+    other = "other"
+
+class InspectionTypeEnum(str, enum.Enum):
+    periodic = "periodic"       # (四輪) 定期檢驗
+    emission = "emission"       # (機車) 排氣定期檢驗
+    reinspection = "reinspection" # 複檢
+    other = "other"
+
+class InspectionResultEnum(str, enum.Enum):
+    passed = "passed"
+    failed = "failed"
+    pending = "pending"
+
+class ViolationStatusEnum(str, enum.Enum):
+    open = "open"       # 未繳費
+    paid = "paid"       # 已繳費
+    appeal = "appeal"   # 申訴中
+    closed = "closed"   # 結案 (申訴成功)
+
 # --- 模型 (Table) 定義 ---
 class Employee(Base):
     __tablename__ = "employees"
@@ -121,6 +149,11 @@ class Vehicle(Base):
     # --- 維護相關關聯 ---
     maintenance_plans = relationship("MaintenancePlan", back_populates="vehicle")
     work_orders = relationship("WorkOrder", back_populates="vehicle")
+    # --- 合規性相關關聯 ---
+    insurances = relationship("Insurance", back_populates="vehicle")
+    taxes_fees = relationship("TaxFee", back_populates="vehicle")
+    inspections = relationship("Inspection", back_populates="vehicle")
+    violations = relationship("Violation", back_populates="vehicle")
 
     def __repr__(self):
         return f"<Vehicle(plate_no='{self.plate_no}', type='{self.vehicle_type.name}')>"
@@ -293,3 +326,126 @@ class WorkOrder(Base):
 
     def __repr__(self):
         return f"<WorkOrder(id={self.id}, type='{self.type.name}', status='{self.status.name}')>"
+    
+# --- 保險紀錄 ---
+class Insurance(Base):
+    """
+    5.4 保險 (insurances)
+    """
+    __tablename__ = "insurances"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
+    
+    policy_type = Column(Enum(InsurancePolicyTypeEnum), nullable=False)
+    policy_no = Column(String(100), nullable=False, index=True, comment="保單號碼")
+    
+    # 關聯到 "vendors" 表 (category='insurance')
+    insurer_id = Column(Integer, ForeignKey("vendors.id"), nullable=True) 
+    
+    coverage = Column(Text, nullable=True, comment="保額/承保範圍 (e.g., 第三人責任險 500/1000/50)")
+    
+    effective_on = Column(Date, nullable=False, comment="保單生效日")
+    expires_on = Column(Date, nullable=False, index=True, comment="保單到期日")
+    
+    premium = Column(Numeric(14, 2), nullable=True, comment="保費")
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # --- 關聯 ---
+    vehicle = relationship("Vehicle", back_populates="insurances")
+    insurer = relationship("Vendor") # 關聯到供應商 (保險公司)
+
+
+# --- 稅費紀錄 ---
+class TaxFee(Base):
+    """
+    5.4 稅費 (taxes_fees)
+    """
+    __tablename__ = "taxes_fees"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
+
+    fee_type = Column(Enum(FeeTypeEnum), nullable=False, index=True)
+    
+    period_start = Column(Date, nullable=False, comment="費用區間 (起)")
+    period_end = Column(Date, nullable=False, comment="費用區間 (迄)")
+    
+    amount = Column(Numeric(14, 2), nullable=False)
+    paid_on = Column(Date, nullable=True, index=True, comment="繳費日期")
+    
+    # 關聯到繳費憑證 (e.g., 繳費收據 PDF)
+    evidence_doc_id = Column(Integer, ForeignKey("vehicle_documents.id"), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # --- 關聯 ---
+    vehicle = relationship("Vehicle", back_populates="taxes_fees")
+    evidence_document = relationship("VehicleDocument")
+
+
+# --- 檢驗紀錄 ---
+class Inspection(Base):
+    """
+    5.4 檢驗 (inspections)
+    """
+    __tablename__ = "inspections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
+    
+    inspection_type = Column(Enum(InspectionTypeEnum), nullable=False, index=True)
+    result = Column(Enum(InspectionResultEnum), default=InspectionResultEnum.pending)
+    
+    inspection_date = Column(Date, nullable=True, comment="實際檢驗日期")
+    next_due_date = Column(Date, nullable=True, index=True, comment="下次應檢驗日期")
+    
+    # 關聯到檢驗站 (vendors 表)
+    inspector_id = Column(Integer, ForeignKey("vendors.id"), nullable=True) 
+    
+    # 關聯到合格證
+    cert_doc_id = Column(Integer, ForeignKey("vehicle_documents.id"), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # --- 關聯 ---
+    vehicle = relationship("Vehicle", back_populates="inspections")
+    inspector = relationship("Vendor") # 關聯到供應商 (檢驗站)
+    certificate_document = relationship("VehicleDocument")
+
+
+# --- 違規紀錄 ---
+class Violation(Base):
+    """
+    5.4 違規 (violations)
+    """
+    __tablename__ = "violations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
+    
+    # 規格書 4.5: 指派責任人
+    driver_id = Column(Integer, ForeignKey("employees.id"), nullable=True, index=True)
+    
+    law_ref = Column(String(255), nullable=True, comment="違反法條 (e.g., 道路交通管理處罰條例 第56條1項)")
+    violation_date = Column(DateTime(timezone=True), nullable=False, comment="違規時間")
+    
+    amount = Column(Numeric(14, 2), nullable=False, comment="罰款金額")
+    
+    # 規格書 4.5: 駕駛積點
+    points = Column(Integer, default=0, comment="駕駛積點")
+    
+    paid_on = Column(Date, nullable=True, comment="繳費日期")
+    
+    # 關聯到罰單影像
+    ticket_doc_id = Column(Integer, ForeignKey("vehicle_documents.id"), nullable=True)
+    
+    status = Column(Enum(ViolationStatusEnum), default=ViolationStatusEnum.open, index=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # --- 關聯 ---
+    vehicle = relationship("Vehicle", back_populates="violations")
+    driver = relationship("Employee", back_populates="violations") # 關聯到駕駛 (員工)
+    ticket_document = relationship("VehicleDocument")
