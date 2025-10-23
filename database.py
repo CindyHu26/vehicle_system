@@ -9,11 +9,9 @@ from dotenv import load_dotenv
 # 程式碼從 os.getenv() 讀取環境變數，而不是寫死
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# (新增) 防呆機制：如果 .env 檔案遺失或忘記設定，程式會直接報錯提醒
+# 防呆機制：如果 .env 檔案遺失或忘記設定，程式會直接報錯提醒
 if not DATABASE_URL:
     raise ValueError("找不到 'DATABASE_URL' 環境變數。請檢查您的 .env 檔案。")
-    
-# --- (以下保持不變) ---
 
 # 建立資料庫引擎
 engine = sqlalchemy.create_engine(DATABASE_URL, pool_pre_ping=True)

@@ -27,8 +27,6 @@ class EmployeeStatusEnum(enum.Enum):
     active = "active"
     inactive = "inactive"
 
-# --- (新增) 規格書 5.1 / 附錄 A 的列舉 ---
-
 class DocumentTypeEnum(str, enum.Enum):
     registration = "registration" # 行照
     insurance = "insurance"       # 保險 (強制/任意)
@@ -53,8 +51,33 @@ class AssetStatusEnum(str, enum.Enum):
     maintenance = "maintenance"   # 維護中
     retired = "retired"           # 報廢
 
-# --- 模型 (Table) 定義 ---
+class VendorCategoryEnum(str, enum.Enum):
+    maintenance = "maintenance"     # 維修保養廠
+    insurance = "insurance"         # 保險公司
+    parking = "parking"             # 停車場
+    emission_check = "emission_check" # (機車)排氣定檢站
+    inspection = "inspection"       # (四輪)定檢站
+    other = "other"
 
+class WorkOrderTypeEnum(str, enum.Enum):
+    maintenance = "maintenance"     # 定期保養
+    repair = "repair"               # 故障維修
+    recall = "recall"               # 召回
+    cleaning = "cleaning"           # 清潔 (洗車)
+    emission_check = "emission_check" # (機車)排氣定檢
+    inspection = "inspection"       # (四輪)定檢
+    purification = "purification"
+    other = "other"
+
+class WorkOrderStatusEnum(str, enum.Enum):
+    draft = "draft"                 # 草稿
+    pending_approval = "pending_approval" # 待核准
+    in_progress = "in_progress"     # 進行中
+    completed = "completed"         # 完成
+    billed = "billed"               # 待對帳
+    closed = "closed"               # 結案
+
+# --- 模型 (Table) 定義 ---
 class Employee(Base):
     __tablename__ = "employees"
     id = Column(Integer, primary_key=True, index=True)
@@ -70,7 +93,6 @@ class Employee(Base):
 
 
 class Vehicle(Base):
-    # ... (保持不變，除了新增 'relationships') ...
     __tablename__ = "vehicles"
     id = Column(Integer, primary_key=True, index=True)
     plate_no = Column(String(20), unique=True, nullable=False, index=True)
@@ -89,18 +111,21 @@ class Vehicle(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # --- (新增) 關聯 (Relationships) ---
+    # --- 關聯 (Relationships) ---
     # 'documents' 屬性: 讓 Python 可以透過 vehicle.documents 存取這台車的所有文件
     documents = relationship("VehicleDocument", back_populates="vehicle")
     
     # 'assets' 屬性: 讓 Python 可以透過 vehicle.assets 存取這台車的所有備品
     assets = relationship("VehicleAsset", back_populates="vehicle")
 
+    # --- 維護相關關聯 ---
+    maintenance_plans = relationship("MaintenancePlan", back_populates="vehicle")
+    work_orders = relationship("WorkOrder", back_populates="vehicle")
+
     def __repr__(self):
         return f"<Vehicle(plate_no='{self.plate_no}', type='{self.vehicle_type.name}')>"
 
-
-# --- (新增) 車輛文件索引 ---
+# --- 車輛文件索引 ---
 class VehicleDocument(Base):
     """
     5.1 車輛文件索引 (vehicle_documents)
@@ -129,14 +154,14 @@ class VehicleDocument(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # --- (新增) 關聯 ---
+    # --- 關聯 ---
     vehicle = relationship("Vehicle", back_populates="documents")
 
     def __repr__(self):
         return f"<Document(type='{self.doc_type.name}', vehicle_id={self.vehicle_id})>"
 
 
-# --- (新增) 車輛備品資產 ---
+# --- 車輛備品資產 ---
 class VehicleAsset(Base):
     """
     5.1 備品資產 (vehicle_assets)
@@ -164,8 +189,107 @@ class VehicleAsset(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # --- (新增) 關聯 ---
+    # --- 關聯 ---
     vehicle = relationship("Vehicle", back_populates="assets")
     
     def __repr__(self):
         return f"<Asset(type='{self.asset_type.name}', serial='{self.serial_no}')>"
+    
+# --- 供應商主檔 ---
+class Vendor(Base):
+    """
+    5.1 供應商 (vendors)
+    """
+    __tablename__ = "vendors"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, index=True)
+    category = Column(Enum(VendorCategoryEnum), nullable=False, index=True)
+    contact = Column(String(255), nullable=True, comment="聯絡人/電話/Email")
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # --- 關聯 ---
+    work_orders = relationship("WorkOrder", back_populates="vendor")
+
+    def __repr__(self):
+        return f"<Vendor(name='{self.name}', category='{self.category.name}')>"
+
+
+# --- 保養計畫 ---
+class MaintenancePlan(Base):
+    """
+    5.3 保養計畫 (maintenance_plans)
+    """
+    __tablename__ = "maintenance_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
+    
+    # 規格書 4.3 範例: '每 10,000 km 或 6 個月'
+    # 我們將其拆分為可計算的欄位
+    
+    policy_name = Column(String(255), comment="計畫名稱 (e.g., 原廠定保, 換機油)")
+    
+    # 依里程
+    interval_km = Column(Integer, nullable=True, comment="間隔公里數 (e.g., 5000)")
+    next_due_odometer = Column(Integer, nullable=True, comment="下次到期里程數")
+    
+    # 依時間
+    interval_months = Column(Integer, nullable=True, comment="間隔月數 (e.g., 6)")
+    next_due_date = Column(Date, nullable=True, comment="下次到期日期")
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # --- 關聯 ---
+    vehicle = relationship("Vehicle", back_populates="maintenance_plans")
+
+    def __repr__(self):
+        return f"<MaintenancePlan(vehicle_id={self.vehicle_id}, policy='{self.policy_name}')>"
+
+
+# --- 維護工單 ---
+class WorkOrder(Base):
+    """
+    5.3 工單 (work_orders)
+    """
+    __tablename__ = "work_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
+    
+    type = Column(Enum(WorkOrderTypeEnum), nullable=False, index=True)
+    status = Column(Enum(WorkOrderStatusEnum), default=WorkOrderStatusEnum.draft, nullable=False, index=True)
+    
+    # 關聯供應商
+    vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=True, index=True)
+    
+    scheduled_on = Column(Date, nullable=True, comment="預計執行日期")
+    completed_on = Column(Date, nullable=True, comment="實際完成日期")
+    
+    # 規格書 15. 金額用 numeric(14,2)
+    cost_amount = Column(Numeric(14, 2), nullable=True)
+    
+    # 關聯發票 (規格書 5.3)
+    invoice_doc_id = Column(Integer, ForeignKey("vehicle_documents.id"), nullable=True)
+    
+    notes = Column(Text, nullable=True, comment="工單說明 (e.g., 更換煞車來令片)")
+    
+    # 紀錄當時的里程數
+    odometer_at_service = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # --- 關聯 ---
+    vehicle = relationship("Vehicle", back_populates="work_orders")
+    vendor = relationship("Vendor", back_populates="work_orders")
+    
+    # 讓工單可以反查發票文件
+    invoice_document = relationship("VehicleDocument")
+
+    def __repr__(self):
+        return f"<WorkOrder(id={self.id}, type='{self.type.name}', status='{self.status.name}')>"

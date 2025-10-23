@@ -1,12 +1,14 @@
 # 檔案名稱: schemas.py
 from pydantic import BaseModel, ConfigDict
 from datetime import date, datetime
-from typing import List # <-- (新增)
+from typing import List, Optional
+from decimal import Decimal
 
 # 匯入我們在 models.py 中定義的 Enum
 from models import (
     VehicleTypeEnum, VehicleStatusEnum, EmployeeStatusEnum,
-    DocumentTypeEnum, AssetTypeEnum, AssetStatusEnum # <-- (新增)
+    DocumentTypeEnum, AssetTypeEnum, AssetStatusEnum,
+    VendorCategoryEnum, WorkOrderTypeEnum, WorkOrderStatusEnum
 )
 
 # --- Employee Schemas ---
@@ -27,8 +29,7 @@ class Employee(EmployeeBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-# --- (新增) VehicleDocument Schemas ---
-
+# --- VehicleDocument Schemas ---
 class VehicleDocumentBase(BaseModel):
     doc_type: DocumentTypeEnum
     file_url: str
@@ -71,6 +72,68 @@ class VehicleAsset(VehicleAssetBase):
     
     model_config = ConfigDict(from_attributes=True)
 
+# --- Vendor Schemas ---
+class VendorBase(BaseModel):
+    name: str
+    category: VendorCategoryEnum
+    contact: str | None = None
+    notes: str | None = None
+
+class VendorCreate(VendorBase):
+    pass
+
+class Vendor(VendorBase):
+    id: int
+    created_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+
+# --- MaintenancePlan Schemas ---
+class MaintenancePlanBase(BaseModel):
+    policy_name: str
+    interval_km: int | None = None
+    next_due_odometer: int | None = None
+    interval_months: int | None = None
+    next_due_date: date | None = None
+
+class MaintenancePlanCreate(MaintenancePlanBase):
+    # 建立時計畫時，必須指定 vehicle_id
+    # 但我們會從 URL 傳入，所以 body 中不用
+    pass
+
+class MaintenancePlan(MaintenancePlanBase):
+    id: int
+    vehicle_id: int
+    created_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+
+# --- WorkOrder Schemas ---
+class WorkOrderBase(BaseModel):
+    type: WorkOrderTypeEnum
+    status: WorkOrderStatusEnum = WorkOrderStatusEnum.draft
+    vendor_id: int | None = None
+    scheduled_on: date | None = None
+    completed_on: date | None = None
+    cost_amount: Decimal | None = None # 使用 Decimal 處理金額
+    invoice_doc_id: int | None = None
+    notes: str | None = None
+    odometer_at_service: int | None = None
+
+class WorkOrderCreate(WorkOrderBase):
+    # 建立工單時，必須指定 vehicle_id
+    vehicle_id: int
+
+class WorkOrder(WorkOrderBase):
+    id: int
+    vehicle_id: int
+    created_at: datetime
+    updated_at: datetime | None = None
+
+    # (選填) 巢狀回傳供應商的簡易資訊
+    vendor: Optional[Vendor] = None # Optional 表示可以是 None
+    
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True) # 允許 Decimal
 
 class VehicleBase(BaseModel):
     plate_no: str
@@ -89,14 +152,16 @@ class VehicleBase(BaseModel):
 class VehicleCreate(VehicleBase):
     pass
 
-class Vehicle(VehicleBase): # <-- (!!! 修改這裡 !!!)
+class Vehicle(VehicleBase):
     """(R) 讀取/回傳時用的 Schema"""
     id: int
     created_at: datetime
     updated_at: datetime | None = None
     
-    # --- (新增) 巢狀回傳關聯資料 ---
-    documents: List[VehicleDocument] = [] # 回傳文件清單
-    assets: List[VehicleAsset] = []     # 回傳備品清單
+    # --- (擴充) 巢狀回傳關聯資料 ---
+    documents: List[VehicleDocument] = []
+    assets: List[VehicleAsset] = []
+    maintenance_plans: List[MaintenancePlan] = [] 
+    work_orders: List[WorkOrder] = []            
     
     model_config = ConfigDict(from_attributes=True)
