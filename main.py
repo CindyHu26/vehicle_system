@@ -25,7 +25,6 @@ def get_db():
         db.close()
 
 # --- API Endpoints (API 路由) ---
-
 # --- Employees API (!!! 修改 !!!) ---
 @app.post("/api/v1/employees/", response_model=schemas.Employee, summary="建立新員工")
 def create_employee_api(employee: schemas.EmployeeCreate, db: Session = Depends(get_db)):
@@ -33,21 +32,21 @@ def create_employee_api(employee: schemas.EmployeeCreate, db: Session = Depends(
     if db_employee:
         raise HTTPException(status_code=400, detail=f"員工編號 {employee.emp_no} 已存在")
     
-    # 建立完後，用 get_employee 重新查詢，以包含空的 violations 列表
+    # crud.get_employee 會載入所有關聯 (包含空的 reservations)
     new_emp = crud.create_employee(db=db, employee=employee)
     return crud.get_employee(db, employee_id=new_emp.id)
 
 
 @app.get("/api/v1/employees/", response_model=List[schemas.Employee], summary="查詢員工列表")
 def read_employees_api(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    # crud.get_employees 現在會自動載入 violations
+    # crud.get_employees 現在會自動載入所有關聯
     employees = crud.get_employees(db, skip=skip, limit=limit)
     return employees
 
 
 @app.get("/api/v1/employees/{employee_id}", response_model=schemas.Employee, summary="查詢單一員工")
 def read_employee_api(employee_id: int, db: Session = Depends(get_db)):
-    # crud.get_employee 現在會自動載入 violations
+    # crud.get_employee 現在會自動載入所有關聯
     db_employee = crud.get_employee(db, employee_id=employee_id)
     if db_employee is None:
         raise HTTPException(status_code=404, detail="找不到該員工")
@@ -61,7 +60,7 @@ def create_vehicle_api(vehicle: schemas.VehicleCreate, db: Session = Depends(get
     if db_vehicle:
         raise HTTPException(status_code=400, detail=f"車牌號碼 {vehicle.plate_no} 已存在")
     
-    # crud.get_vehicle 會載入所有關聯 (包含空的合規列表)
+    # crud.get_vehicle 會載入所有關聯 (包含空的 reservations)
     new_vehicle = crud.create_vehicle(db=db, vehicle=vehicle)
     return crud.get_vehicle(db, vehicle_id=new_vehicle.id)
 
@@ -350,7 +349,6 @@ def read_vehicle_taxes_fees_api(
 
 
 # --- Inspections API ---
-
 @app.post("/api/v1/inspections/", 
           response_model=schemas.Inspection, 
           summary="建立新檢驗紀錄")
@@ -429,3 +427,88 @@ def read_driver_violations_api(
     if db_driver is None:
         raise HTTPException(status_code=404, detail="找不到該員工")
     return crud.get_violations_for_driver(db=db, driver_id=employee_id)
+
+# --- Reservations API ---
+
+@app.post("/api/v1/reservations/", 
+          response_model=schemas.Reservation, 
+          summary="建立新借車申請 (預約)")
+def create_reservation_api(
+    reservation: schemas.ReservationCreate, 
+    db: Session = Depends(get_db)
+):
+    """
+    建立一筆新的借車申請。
+    - **requester_id**: 申請員工 ID
+    - **vehicle_id**: (選填) 指定車輛 ID
+    - **start_ts / end_ts**: 預計起迄時間
+    
+    (簡易版邏輯): 
+    - 若指定 vehicle_id，系統會檢查衝突與合規性 (強制險/車況)，
+      若通過，狀態會直接設為 'approved' (已核准)。
+    - 若未指定 vehicle_id，狀態會設為 'pending' (待審核)，
+      等待調度員後續指派車輛 (Update API 未來實作)。
+    """
+    try:
+        new_reservation = crud.create_reservation(db=db, reservation=reservation)
+        # 重新查詢以載入 trip (會是 null)
+        return crud.get_reservation(db, reservation_id=new_reservation.id)
+    except ValueError as e:
+        # 捕捉 crud 中拋出的錯誤 (e.g., 衝突, 合規失敗)
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/v1/reservations/", 
+         response_model=List[schemas.Reservation],
+         summary="查詢預約列表")
+def read_reservations_api(
+    skip: int = 0, 
+    limit: int = 100, 
+    db: Session = Depends(get_db)
+):
+    """
+    取得系統中所有的預約申請 (分頁)，包含已完成的行程回報。
+    """
+    return crud.get_reservations(db, skip=skip, limit=limit)
+
+@app.get("/api/v1/reservations/{reservation_id}", 
+         response_model=schemas.Reservation,
+         summary="查詢單一預約")
+def read_reservation_api(
+    reservation_id: int, 
+    db: Session = Depends(get_db)
+):
+    """
+    依據 ID 查詢單一預約，包含已完成的行程回報。
+    """
+    db_reservation = crud.get_reservation(db, reservation_id=reservation_id)
+    if db_reservation is None:
+        raise HTTPException(status_code=404, detail="找不到該預約")
+    return db_reservation
+
+
+# --- Trips API ---
+@app.post("/api/v1/reservations/{reservation_id}/trip/", 
+          response_model=schemas.Trip, 
+          summary="回報行程 (還車)")
+def create_trip_api(
+    reservation_id: int, 
+    trip: schemas.TripCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    為一筆「已核准」的預約回報行程 (還車)。
+    - **reservation_id**: 要回報的預約 ID
+    - **vehicle_id / driver_id**: 必須與預約單上一致
+    - **odometer_start / odometer_end**: 起迄里程
+    
+    (簡易版邏輯): 
+    - 成功回報後，會自動將預約 (Reservation) 狀態更新為 'completed'。
+    """
+    try:
+        return crud.create_trip_for_reservation(
+            db=db, 
+            trip=trip, 
+            reservation_id=reservation_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

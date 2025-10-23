@@ -10,8 +10,59 @@ from models import (
     DocumentTypeEnum, AssetTypeEnum, AssetStatusEnum,
     VendorCategoryEnum, WorkOrderTypeEnum, WorkOrderStatusEnum,
     InsurancePolicyTypeEnum, FeeTypeEnum, InspectionTypeEnum, 
-    InspectionResultEnum, ViolationStatusEnum
+    InspectionResultEnum, ViolationStatusEnum,
+    ReservationPurposeEnum, ReservationStatusEnum
 )
+
+# --- Trip Schemas ---
+class TripBase(BaseModel):
+    odometer_start: int | None = None
+    odometer_end: int | None = None
+    fuel_liters: Decimal | None = None
+    charge_kwh: Decimal | None = None
+    evidence_photo_url: str | None = None
+    notes: str | None = None
+
+class TripCreate(TripBase):
+    # 建立時，必須指定 vehicle_id 和 driver_id
+    vehicle_id: int
+    driver_id: int
+
+class Trip(TripBase):
+    id: int
+    reservation_id: int
+    vehicle_id: int
+    driver_id: int
+    returned_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
+
+# --- Reservation Schemas ---
+class ReservationBase(BaseModel):
+    purpose: ReservationPurposeEnum
+    vehicle_type_pref: VehicleTypeEnum | None = None
+    start_ts: datetime # 預計開始時間 (含時區 e.g., 2025-10-25T09:00:00+08:00)
+    end_ts: datetime   # 預計結束時間
+    destination: str | None = None
+
+class ReservationCreate(ReservationBase):
+    # 建立時，必須指定申請人
+    requester_id: int
+    # 建立時，可(選填)直接指定車輛
+    vehicle_id: int | None = None 
+
+class Reservation(ReservationBase):
+    id: int
+    requester_id: int
+    vehicle_id: int | None = None
+    status: ReservationStatusEnum
+    created_at: datetime
+    updated_at: datetime | None = None
+    
+    # 巢狀回傳還車時的行程
+    trip: Optional[Trip] = None
+    
+    model_config = ConfigDict(from_attributes=True)
 
 class ViolationBase(BaseModel):
     vehicle_id: int
@@ -31,6 +82,9 @@ class Violation(ViolationBase):
     id: int
     created_at: datetime
     
+    # (選填) 巢狀回傳駕駛員 (避免循環參照)
+    # driver: Optional[Employee] = None # <- 這會造成循環 import
+    
     model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
 # --- Employee Schemas ---
@@ -49,6 +103,8 @@ class Employee(EmployeeBase):
     created_at: datetime
     updated_at: datetime | None = None
     violations: List[Violation] = [] # 顯示該員工的違規紀錄
+    reservations_requested: List[Reservation] = []
+    trips_driven: List[Trip] = []
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -250,7 +306,7 @@ class Vehicle(VehicleBase):
     created_at: datetime
     updated_at: datetime | None = None
     
-    # --- (擴充) 巢狀回傳關聯資料 ---
+    # --- 巢狀回傳關聯資料 ---
     documents: List[VehicleDocument] = []
     assets: List[VehicleAsset] = []
     maintenance_plans: List[MaintenancePlan] = [] 
@@ -259,5 +315,7 @@ class Vehicle(VehicleBase):
     taxes_fees: List[TaxFee] = []     # 稅費
     inspections: List[Inspection] = [] # 檢驗
     violations: List[Violation] = []   # 違規
-        
+
+    reservations: List[Reservation] = [] # 這台車的所有預約
+    trips: List[Trip] = []               # 這台車的所有行程
     model_config = ConfigDict(from_attributes=True)

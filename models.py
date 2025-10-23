@@ -5,6 +5,7 @@ from sqlalchemy import (
     ForeignKey, Numeric, DateTime, func, Text
 )
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import JSONB
 
 from database import Base
 
@@ -105,6 +106,20 @@ class ViolationStatusEnum(str, enum.Enum):
     appeal = "appeal"   # 申訴中
     closed = "closed"   # 結案 (申訴成功)
 
+class ReservationPurposeEnum(str, enum.Enum):
+    business = "business"   # 公務
+    commute = "commute"     # 通勤
+    errand = "errand"       # 跑腿/其他
+    other = "other"
+
+class ReservationStatusEnum(str, enum.Enum):
+    pending = "pending"     # 待審核
+    approved = "approved"   # 已核准 (待取車)
+    rejected = "rejected"   # 已拒絕
+    in_progress = "in_progress" # 進行中 (已取車)
+    completed = "completed" # 已完成 (已還車)
+    cancelled = "cancelled" # (使用者) 已取消
+
 # --- 模型 (Table) 定義 ---
 class Employee(Base):
     __tablename__ = "employees"
@@ -116,6 +131,11 @@ class Employee(Base):
     status = Column(Enum(EmployeeStatusEnum), default=EmployeeStatusEnum.active, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    violations = relationship("Violation", back_populates="driver")
+    # 讓 Python 可以透過 employee.reservations 存取該員工的所有申請
+    reservations_requested = relationship("Reservation", back_populates="requester", foreign_keys="[Reservation.requester_id]")
+    # 讓 Python 可以透過 employee.trips 存取該員工的所有行程
+    trips_driven = relationship("Trip", back_populates="driver")
     def __repr__(self):
         return f"<Employee(emp_no='{self.emp_no}', name='{self.name}')>"
 
@@ -155,8 +175,90 @@ class Vehicle(Base):
     inspections = relationship("Inspection", back_populates="vehicle")
     violations = relationship("Violation", back_populates="vehicle")
 
+    reservations = relationship("Reservation", back_populates="vehicle")
+    trips = relationship("Trip", back_populates="vehicle")
     def __repr__(self):
         return f"<Vehicle(plate_no='{self.plate_no}', type='{self.vehicle_type.name}')>"
+
+# --- 借車申請 ---
+class Reservation(Base):
+    """
+    5.2 借車申請 (reservations)
+    (本階段簡化：Reservation 即為 Assignment)
+    """
+    __tablename__ = "reservations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # 關聯到申請人 (員工)
+    requester_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    
+    # 關聯到「被核准」的車輛 (一開始申請時可以是 null)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=True, index=True)
+    
+    purpose = Column(Enum(ReservationPurposeEnum), nullable=False)
+    
+    # 規格書 4.2 偏好 (先用 Enum 簡化)
+    vehicle_type_pref = Column(Enum(VehicleTypeEnum), nullable=True, comment="偏好車種")
+
+    start_ts = Column(DateTime(timezone=True), nullable=False, index=True, comment="預計開始時間")
+    end_ts = Column(DateTime(timezone=True), nullable=False, index=True, comment="預計結束時間")
+    
+    status = Column(Enum(ReservationStatusEnum), default=ReservationStatusEnum.pending, nullable=False, index=True)
+    
+    # 規格書 4.2 目的地
+    destination = Column(String(255), nullable=True, comment="目的地")
+    
+    # 規格書 5.2 (簡化，未來拆分 Assignment 時使用)
+    # bound_assets = Column(JSONB, nullable=True, comment="綁定的備品 (e.g., {'helmet_id': 1, 'lock_id': 2})")
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # --- 關聯 ---
+    requester = relationship("Employee", back_populates="reservations_requested", foreign_keys=[requester_id])
+    vehicle = relationship("Vehicle", back_populates="reservations")
+    
+    # 關聯到還車時的行程回報 (一對一)
+    trip = relationship("Trip", back_populates="reservation", uselist=False)
+
+
+# --- 行程回報 ---
+class Trip(Base):
+    """
+    5.3 行程回報 (trips)
+    """
+    __tablename__ = "trips"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # 關聯到哪一筆預約
+    reservation_id = Column(Integer, ForeignKey("reservations.id"), unique=True, nullable=False, index=True)
+    
+    # (反正規化) 儲存實際的車輛和駕駛
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
+    driver_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    
+    # 規格書 4.2 里程回報
+    odometer_start = Column(Integer, nullable=True, comment="出發里程數")
+    odometer_end = Column(Integer, nullable=True, comment="歸還里程數")
+    
+    # 規格書 4.2 油耗/電量回報
+    fuel_liters = Column(Numeric(10, 2), nullable=True, comment="加油公升數")
+    charge_kwh = Column(Numeric(10, 2), nullable=True, comment="充電度數")
+    
+    # 規格書 4.2 上傳照片 (e.g., 還車儀表板)
+    evidence_photo_url = Column(String(1024), nullable=True, comment="佐證照片 URL")
+
+    notes = Column(Text, nullable=True, comment="行程備註 (e.g., 車輛有異音)")
+    
+    # 實際還車時間
+    returned_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # --- 關聯 ---
+    reservation = relationship("Reservation", back_populates="trip")
+    vehicle = relationship("Vehicle", back_populates="trips")
+    driver = relationship("Employee", back_populates="trips_driven")
 
 # --- 車輛文件索引 ---
 class VehicleDocument(Base):

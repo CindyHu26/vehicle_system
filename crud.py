@@ -1,20 +1,27 @@
 # 檔案名稱: crud.py
-from sqlalchemy.orm import Session, joinedload # <-- joinedload
+from sqlalchemy.orm import Session, joinedload, subqueryload
 import models
 import schemas
+from datetime import datetime
 
 # --- Employee CRUD ---
 def get_employee(db: Session, employee_id: int):
     """ (R) 依據 ID 查詢單一員工 (!!! 修改 !!!) """
     return db.query(models.Employee).options(
-        joinedload(models.Employee.violations) # 載入違規紀錄
+        joinedload(models.Employee.violations),
+        # 使用 subqueryload 避免過多 JOIN
+        subqueryload(models.Employee.reservations_requested), 
+        subqueryload(models.Employee.trips_driven)
     ).filter(models.Employee.id == employee_id).first()
+
 def get_employee_by_emp_no(db: Session, emp_no: str):
     return db.query(models.Employee).filter(models.Employee.emp_no == emp_no).first()
 def get_employees(db: Session, skip: int = 0, limit: int = 100):
     """ (R) 查詢多筆員工 (分頁) (!!! 修改 !!!) """
     return db.query(models.Employee).options(
-        joinedload(models.Employee.violations) # 載入違規紀錄
+        subqueryload(models.Employee.violations),
+        subqueryload(models.Employee.reservations_requested),
+        subqueryload(models.Employee.trips_driven)
     ).offset(skip).limit(limit).all()
 def create_employee(db: Session, employee: schemas.EmployeeCreate):
     db_employee = models.Employee(**employee.model_dump())
@@ -26,17 +33,20 @@ def create_employee(db: Session, employee: schemas.EmployeeCreate):
 def get_vehicle(db: Session, vehicle_id: int):
     """ 
     (R) 依據 ID 查詢單一車輛
-    (!!! 修改 !!!) 加入 plans 和 orders
+    (!!! 修改 !!!) 加入預約與行程
     """
     return db.query(models.Vehicle).options(
-        joinedload(models.Vehicle.documents),         # 載入文件
-        joinedload(models.Vehicle.assets),            # 載入備品
-        joinedload(models.Vehicle.maintenance_plans), # 載入保養計畫
-        joinedload(models.Vehicle.work_orders),        # 載入工單
-        joinedload(models.Vehicle.insurances),         # 加入合規性關聯
-        joinedload(models.Vehicle.taxes_fees),
-        joinedload(models.Vehicle.inspections),
-        joinedload(models.Vehicle.violations)
+        # (使用 subqueryload 提高效能)
+        subqueryload(models.Vehicle.documents),
+        subqueryload(models.Vehicle.assets),
+        subqueryload(models.Vehicle.maintenance_plans),
+        subqueryload(models.Vehicle.work_orders).joinedload(models.WorkOrder.vendor), # 工單要含供應商
+        subqueryload(models.Vehicle.insurances).joinedload(models.Insurance.insurer), # 保險要含供應商
+        subqueryload(models.Vehicle.taxes_fees),
+        subqueryload(models.Vehicle.inspections).joinedload(models.Inspection.inspector), # 檢驗要含供應商
+        subqueryload(models.Vehicle.violations),
+        subqueryload(models.Vehicle.reservations),
+        subqueryload(models.Vehicle.trips)
     ).filter(models.Vehicle.id == vehicle_id).first()
 
 def get_vehicle_by_plate_no(db: Session, plate_no: str):
@@ -47,17 +57,20 @@ def get_vehicle_by_plate_no(db: Session, plate_no: str):
 def get_vehicles(db: Session, skip: int = 0, limit: int = 100):
     """ 
     (R) 查詢多筆車輛 (分頁)
-    (!!! 修改 !!!) 使用 joinedload 主動載入關聯資料
+    (!!! 修改 !!!) 加入預約與行程
     """
     return db.query(models.Vehicle).options(
-        joinedload(models.Vehicle.documents), # 載入文件
-        joinedload(models.Vehicle.assets),    # 載入備品
-        joinedload(models.Vehicle.maintenance_plans),
-        joinedload(models.Vehicle.work_orders),
-        joinedload(models.Vehicle.insurances),
-        joinedload(models.Vehicle.taxes_fees),
-        joinedload(models.Vehicle.inspections),
-        joinedload(models.Vehicle.violations)
+        # (使用 subqueryload 提高效能)
+        subqueryload(models.Vehicle.documents),
+        subqueryload(models.Vehicle.assets),
+        subqueryload(models.Vehicle.maintenance_plans),
+        subqueryload(models.Vehicle.work_orders),
+        subqueryload(models.Vehicle.insurances),
+        subqueryload(models.Vehicle.taxes_fees),
+        subqueryload(models.Vehicle.inspections),
+        subqueryload(models.Vehicle.violations),
+        subqueryload(models.Vehicle.reservations),
+        subqueryload(models.Vehicle.trips)
     ).offset(skip).limit(limit).all()
 
 def create_vehicle(db: Session, vehicle: schemas.VehicleCreate):
@@ -314,3 +327,113 @@ def get_violations_for_driver(db: Session, driver_id: int):
     return db.query(models.Violation)\
              .filter(models.Violation.driver_id == driver_id)\
              .all()
+
+# --- (新增) Reservation CRUD ---
+
+def create_reservation(db: Session, reservation: schemas.ReservationCreate):
+    """ (C) 建立新預約申請 """
+    # 檢查申請人是否存在
+    db_requester = get_employee(db, reservation.requester_id)
+    if not db_requester:
+        raise ValueError(f"ID 為 {reservation.requester_id} 的申請人不存在")
+    
+    # 檢查車輛是否存在 (如果指定)
+    if reservation.vehicle_id:
+        db_vehicle = get_vehicle(db, reservation.vehicle_id)
+        if not db_vehicle:
+            raise ValueError(f"ID 為 {reservation.vehicle_id} 的車輛不存在")
+    
+    # (!!! 核心) 檢查時段衝突 (簡易版)
+    # 我們檢查「被指定的車輛」在「該時段」是否已有「已核准」的預約
+    if reservation.vehicle_id:
+        existing_reservation = db.query(models.Reservation).filter(
+            models.Reservation.vehicle_id == reservation.vehicle_id,
+            models.Reservation.status == models.ReservationStatusEnum.approved,
+            # (B.start < A.end) AND (B.end > A.start) -> 表示重疊
+            models.Reservation.start_ts < reservation.end_ts,
+            models.Reservation.end_ts > reservation.start_ts
+        ).first()
+        
+        if existing_reservation:
+            raise ValueError(f"車輛 {reservation.vehicle_id} 在該時段已被 {existing_reservation.id} 預約")
+
+    # (!!! 核心) 檢查法規 (簡易版)
+    # 規格書 4.6, 12: 檢查保險/定檢是否有效
+    if reservation.vehicle_id:
+        db_vehicle = get_vehicle(db, reservation.vehicle_id) # 拿 Eager loaded data
+        # 1. 檢查強制險
+        cali_valid = False
+        today = datetime.now(reservation.start_ts.tzinfo).date() # 以預約日的時區為主
+        for ins in db_vehicle.insurances:
+            if ins.policy_type == models.InsurancePolicyTypeEnum.CALI and ins.expires_on >= today:
+                cali_valid = True
+                break
+        if not cali_valid:
+            raise ValueError(f"車輛 {db_vehicle.plate_no} 強制險已過期或不存在，禁止派車")
+            
+        # 2. 檢查車況 (未來可擴充定檢)
+        if db_vehicle.status != models.VehicleStatusEnum.active:
+             raise ValueError(f"車輛 {db_vehicle.plate_no} 目前狀態為 {db_vehicle.status.name}，禁止派車")
+
+    # 如果沒指定車輛，或指定了且通過檢查，則建立預約
+    # (簡化流程：建立即核准)
+    db_reservation = models.Reservation(
+        **reservation.model_dump(),
+        status=models.ReservationStatusEnum.approved if reservation.vehicle_id else models.ReservationStatusEnum.pending
+    )
+    db.add(db_reservation)
+    db.commit()
+    db.refresh(db_reservation)
+    return db_reservation
+
+def get_reservation(db: Session, reservation_id: int):
+    """ (R) 查詢單一預約 (含行程回報) """
+    return db.query(models.Reservation).options(
+        joinedload(models.Reservation.trip) # 載入行程
+    ).filter(models.Reservation.id == reservation_id).first()
+
+def get_reservations(db: Session, skip: int = 0, limit: int = 100):
+    """ (R) 查詢所有預約 """
+    return db.query(models.Reservation).options(
+        joinedload(models.Reservation.trip)
+    ).offset(skip).limit(limit).all()
+
+
+# --- (新增) Trip CRUD ---
+
+def create_trip_for_reservation(
+    db: Session, 
+    trip: schemas.TripCreate, 
+    reservation_id: int
+):
+    """ (C) 為預約建立行程回報 (還車) """
+    # 1. 檢查預約是否存在
+    db_reservation = get_reservation(db, reservation_id)
+    if not db_reservation:
+        raise ValueError(f"ID 為 {reservation_id} 的預約不存在")
+        
+    # 2. 檢查是否已回報過
+    if db_reservation.trip:
+        raise ValueError(f"預約 {reservation_id} 已經回報過行程 (Trip ID: {db_reservation.trip.id})")
+        
+    # 3. 檢查還車的車輛/駕駛是否與預約單上一致
+    if db_reservation.vehicle_id != trip.vehicle_id:
+        raise ValueError("回報的車輛 ID 與預約單不符")
+    if db_reservation.requester_id != trip.driver_id:
+        # (未來可擴充：允許調度員指派不同駕駛)
+        raise ValueError("回報的駕駛 ID 與預約申請人不符")
+        
+    # 4. 建立 Trip
+    db_trip = models.Trip(
+        **trip.model_dump(),
+        reservation_id=reservation_id
+    )
+    db.add(db_trip)
+    
+    # 5. (!!! 核心) 更新預約單狀態
+    db_reservation.status = models.ReservationStatusEnum.completed
+    db.add(db_reservation)
+    
+    db.commit()
+    db.refresh(db_trip)
+    return db_trip
