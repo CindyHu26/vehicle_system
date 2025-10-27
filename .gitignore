@@ -12,3 +12,6 @@ __pycache__/
 .idea/
 
 .env
+
+# 排除上傳檔案的目錄
+uploads/

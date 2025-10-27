@@ -169,13 +169,20 @@ def delete_vehicle(
 
 def create_vehicle_document(
     db: Session, 
-    document: schemas.VehicleDocumentCreate, 
-    vehicle_id: int
+    document: schemas.VehicleDocumentCreate, # 使用修改後的 Schema
+    vehicle_id: int,
+
+    file_url: str, 
+    sha256: str | None = None
 ):
     """ (C) 建立新的車輛文件，並綁定到 vehicle_id """
     db_document = models.VehicleDocument(
+        # 從 Pydantic schema 取得元資料
         **document.model_dump(), 
-        vehicle_id=vehicle_id
+        # 從參數取得檔案資訊
+        vehicle_id=vehicle_id,
+        file_url=file_url,
+        sha256=sha256
     )
     db.add(db_document)
     db.commit()

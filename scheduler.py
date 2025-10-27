@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 import crud
 import logging
-from datetime import datetime,timezone
+from datetime import datetime, timezone, timedelta
 
 # 設定日誌
 logging.basicConfig()

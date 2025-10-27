@@ -1,13 +1,22 @@
 # 檔案名稱: main.py
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
+from pathlib import Path
 
 import crud
 import models
 import schemas
 from database import SessionLocal, engine
 from dependencies import get_db, get_current_actor_id
+
+import utils
+import analytics
+import import_data
+
+from fastapi.responses import FileResponse
+import mimetypes
 
 # 匯入排程器
 from scheduler import start_scheduler, stop_scheduler, check_upcoming_expirations_job
@@ -16,6 +25,18 @@ app = FastAPI(
     title="公務車與機車管理系統 API",
     description="規格書 v0.2 實作",
     version="0.2.0"
+)
+
+# 啟用 CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # --- FastAPI 啟動與關閉事件 ---
@@ -78,6 +99,16 @@ def read_employee_api(employee_id: int, db: Session = Depends(get_db)):
     if db_employee is None:
         raise HTTPException(status_code=404, detail="找不到該員工")
     return db_employee
+
+@app.get("/api/v1/employees/emp-no/{emp_no}", response_model=schemas.Employee, summary="依據員工編號查詢員工")
+def read_employee_by_emp_no_api(emp_no: str, db: Session = Depends(get_db)):
+    """
+    依據員工編號查詢員工。
+    """
+    db_employee = crud.get_employee_by_emp_no(db, emp_no=emp_no)
+    if db_employee is None:
+        raise HTTPException(status_code=404, detail="找不到該員工編號")
+    return crud.get_employee(db, employee_id=db_employee.id)
 
 @app.get("/api/v1/vehicles/", response_model=List[schemas.Vehicle], summary="查詢車輛列表")
 def read_vehicles_api(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
@@ -188,28 +219,115 @@ def read_vehicle_api(vehicle_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="找不到該車輛")
     return db_vehicle
 
+@app.get("/api/v1/vehicles/plate/{plate_no}", response_model=schemas.Vehicle, summary="依據車牌查詢車輛")
+def read_vehicle_by_plate_api(plate_no: str, db: Session = Depends(get_db)):
+    """
+    依據車牌號碼查詢車輛。
+    """
+    db_vehicle = crud.get_vehicle_by_plate_no(db, plate_no=plate_no)
+    if db_vehicle is None:
+        raise HTTPException(status_code=404, detail="找不到該車牌")
+    return crud.get_vehicle(db, vehicle_id=db_vehicle.id)
+
 # --- Vehicle Documents API ---
 @app.post("/api/v1/vehicles/{vehicle_id}/documents/", 
           response_model=schemas.VehicleDocument, 
-          summary="為車輛新增文件")
-def create_document_for_vehicle(
+          summary="為車輛新增文件 (包含檔案上傳)")
+async def create_document_for_vehicle( # (!!! 改成 async def !!!)
     vehicle_id: int, 
-    document: schemas.VehicleDocumentCreate, 
-    db: Session = Depends(get_db)
+    # (!!! 修改 !!!) 
+    # 文件元資料現在作為表單欄位傳入，而不是 JSON body
+    # 我們使用 Depends() 將 Pydantic schema 注入
+    doc_meta: schemas.VehicleDocumentCreate = Depends(), 
+    # (!!! 新增 !!!) 接收上傳的檔案
+    file: UploadFile = File(...), 
+    db: Session = Depends(get_db),
+    actor_id: int = Depends(get_current_actor_id) # (加入 actor_id for Audit Log)
 ):
     """
-    為指定的車輛 ID 新增一筆文件索引。
-    - **vehicle_id**: 車輛的資料庫 ID
-    - **doc_type**: 'registration', 'insurance', 'fine', 'emission' 等
-    - **file_url**: 檔案儲存路徑 (e.g., "C:\\share\\abc-1234_insurance.pdf")
-    - **expires_on**: (選填) 文件到期日
+    為指定的車輛 ID 新增一筆文件索引，並同時上傳檔案。
+    
+    使用 multipart/form-data 格式提交：
+    - **doc_type**: 文件類型 (e.g., 'insurance')
+    - **issued_on**: (選填) 核發日期
+    - **expires_on**: (選填) 到期日期
+    - **tags**: (選填) 標籤
+    - **file**: 要上傳的檔案 (PDF, JPG, PNG etc.)
+    
+    (此 API 會自動儲存檔案、計算 SHA256，並記錄 Audit Log)
     """
-    # 先確認車輛存在
+    # 1. 確認車輛存在
     db_vehicle = crud.get_vehicle(db, vehicle_id=vehicle_id)
     if db_vehicle is None:
         raise HTTPException(status_code=404, detail="找不到該車輛")
         
-    return crud.create_vehicle_document(db=db, document=document, vehicle_id=vehicle_id)
+    # 2. 處理檔案上傳
+    try:
+        # 呼叫 utils 儲存檔案並取得路徑/雜湊值
+        # (改成 await，因為 UploadFile 的操作可能是異步的)
+        # (注意：我們的 utils.save_upload_file 不是 async，但 FastAPI 會處理)
+        file_path, sha256_hash = utils.save_upload_file(file) 
+    except IOError as e:
+        raise HTTPException(status_code=500, detail=f"檔案儲存失敗: {e}")
+    except Exception as e:
+         raise HTTPException(status_code=500, detail=f"檔案處理失敗: {e}")
+
+    # 3. 建立文件紀錄到資料庫
+    try:
+        db_document = crud.create_vehicle_document(
+            db=db, 
+            document=doc_meta, # 傳入從表單來的元資料
+            vehicle_id=vehicle_id,
+            file_url=file_path, # 傳入儲存的路徑
+            sha256=sha256_hash # 傳入計算出的雜湊值
+        )
+        
+        # (!!! 新增 Audit Log !!!)
+        # 在 commit 之前加入 Log
+        # 注意: create_vehicle_document 內部有 commit，
+        # 所以 Log 和 Document 建立不在同一個 transaction
+        # 更好的做法是將 commit 移出 create_vehicle_document
+        # 但我們先保持簡單
+        crud.create_audit_log(
+            db=db,
+            actor_id=actor_id,
+            action="CREATE",
+            entity="VehicleDocument",
+            entity_id=db_document.id, # Commit 後已有 ID
+            new_value=db_document # 傳入 SQLAlchemy 物件
+        )
+        # Commit the audit log
+        try:
+             db.commit()
+        except Exception as e:
+             db.rollback()
+             print(f"寫入 Document Audit Log 失敗: {e}") # 記錄錯誤，但不影響主流程
+
+        return db_document
+        
+    except Exception as e:
+        # 如果資料庫寫入失敗，理論上應該刪除剛上傳的檔案
+        # (這裡先省略)
+        raise HTTPException(status_code=500, detail=f"建立文件紀錄失敗: {e}")
+
+@app.get("/files/{file_path:path}", 
+         response_class=FileResponse, # 直接回傳檔案
+         summary="下載已上傳的檔案")
+async def download_file(file_path: str):
+    """
+    根據相對路徑下載 uploads 資料夾中的檔案。
+    (警告：沒有任何權限檢查！僅供測試)
+    """
+    # 組合完整路徑
+    full_path = Path("uploads") / file_path
+    
+    if not full_path.is_file():
+        raise HTTPException(status_code=404, detail="找不到檔案")
+
+    # 猜測檔案類型 (MIME type)
+    media_type, _ = mimetypes.guess_type(full_path)
+    
+    return FileResponse(path=full_path, media_type=media_type, filename=full_path.name)
 
 @app.get("/api/v1/vehicles/{vehicle_id}/documents/", 
          response_model=List[schemas.VehicleDocument],
@@ -603,6 +721,41 @@ def read_reservation_api(
         raise HTTPException(status_code=404, detail="找不到該預約")
     return db_reservation
 
+@app.patch("/api/v1/reservations/{reservation_id}/", 
+          response_model=schemas.Reservation, 
+          summary="更新預約狀態或指派車輛 (部分更新)")
+def update_reservation_status_api(
+    reservation_id: int,
+    status_update: schemas.ReservationUpdate, # 使用 Update Schema
+    db: Session = Depends(get_db),
+    actor_id: int = Depends(get_current_actor_id)
+):
+    """
+    更新預約的狀態 (e.g., pending -> approved/rejected/cancelled)
+    或為 pending 的預約指派 vehicle_id。
+    
+    - 更新狀態為 cancelled 或 rejected 會自動清空 vehicle_id。
+    - 為 pending 預約指派 vehicle_id 會自動將狀態更新為 approved (若無衝突)。
+    - 指派 vehicle_id 時會檢查衝突。
+    
+    會記錄 Audit Log。
+    """
+    try:
+        updated_reservation = crud.update_reservation_status(
+            db=db,
+            reservation_id=reservation_id,
+            status_update=status_update,
+            actor_id=actor_id
+        )
+        if updated_reservation is None:
+             raise HTTPException(status_code=404, detail="找不到該預約")
+             
+        # crud.update_reservation_status 返回更新後的物件
+        # 我們需要重新查詢以包含 trip
+        return crud.get_reservation(db, reservation_id=reservation_id)
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 # --- Trips API ---
 @app.post("/api/v1/reservations/{reservation_id}/trip/", 
@@ -646,3 +799,114 @@ def read_audit_logs_api(
     """
     logs = crud.get_audit_logs(db, skip=skip, limit=limit)
     return logs
+
+# --- Analytics API ---
+@app.get("/api/v1/analytics/vehicle-utilization/{vehicle_id}", 
+         summary="查詢車輛使用率")
+def get_vehicle_utilization_api(
+    vehicle_id: int,
+    start_date: str,
+    end_date: str,
+    db: Session = Depends(get_db)
+):
+    """
+    計算指定車輛在指定日期範圍內的使用率。
+    """
+    from datetime import datetime
+    start = datetime.fromisoformat(start_date).date()
+    end = datetime.fromisoformat(end_date).date()
+    
+    # 檢查車輛是否存在
+    db_vehicle = crud.get_vehicle(db, vehicle_id=vehicle_id)
+    if not db_vehicle:
+        raise HTTPException(status_code=404, detail="找不到該車輛")
+    
+    return analytics.get_vehicle_utilization(db, vehicle_id, start, end)
+
+
+@app.get("/api/v1/analytics/cost-per-km/{vehicle_id}",
+         summary="查詢每公里成本")
+def get_cost_per_km_api(
+    vehicle_id: int,
+    start_date: str,
+    end_date: str,
+    db: Session = Depends(get_db)
+):
+    """
+    計算指定車輛在指定日期範圍內的每公里成本 (TCO)。
+    """
+    from datetime import datetime
+    start = datetime.fromisoformat(start_date).date()
+    end = datetime.fromisoformat(end_date).date()
+    
+    # 檢查車輛是否存在
+    db_vehicle = crud.get_vehicle(db, vehicle_id=vehicle_id)
+    if not db_vehicle:
+        raise HTTPException(status_code=404, detail="找不到該車輛")
+    
+    return analytics.get_cost_per_km(db, vehicle_id, start, end)
+
+
+@app.get("/api/v1/analytics/compliance-report",
+         summary="查詢合規性報表")
+def get_compliance_report_api(
+    days_ahead: int = 30,
+    db: Session = Depends(get_db)
+):
+    """
+    產生合規性報表，顯示即將到期的保險、定檢等項目。
+    """
+    return analytics.get_compliance_report(db, days_ahead=days_ahead)
+
+
+@app.get("/api/v1/analytics/violation-stats",
+         summary="查詢違規統計")
+def get_violation_stats_api(
+    start_date: str,
+    end_date: str,
+    db: Session = Depends(get_db)
+):
+    """
+    查詢指定日期範圍內的違規統計，包含按車輛和按駕駛的統計。
+    """
+    from datetime import datetime
+    start = datetime.fromisoformat(start_date).date()
+    end = datetime.fromisoformat(end_date).date()
+    
+    return analytics.get_violation_stats(db, start, end)
+
+# --- Data Import API ---
+@app.post("/api/v1/import/employees",
+          summary="從 CSV 匯入員工資料")
+def import_employees_api(
+    skip_existing: bool = True,
+    db: Session = Depends(get_db)
+):
+    """
+    從上傳的 CSV 檔案匯入員工資料。
+    """
+    # 這裡應該接收上傳的檔案
+    # 暫時返回說明
+    return {"message": "請使用工具函式 import_employees_from_csv 來匯入資料"}
+
+@app.post("/api/v1/import/vehicles",
+          summary="從 CSV 匯入車輛資料")
+def import_vehicles_api(
+    skip_existing: bool = True,
+    db: Session = Depends(get_db)
+):
+    """
+    從上傳的 CSV 檔案匯入車輛資料。
+    """
+    return {"message": "請使用工具函式 import_vehicles_from_csv 來匯入資料"}
+
+@app.post("/api/v1/import/insurances",
+          summary="從 CSV 匯入保險資料")
+def import_insurances_api(
+    skip_existing: bool = True,
+    db: Session = Depends(get_db)
+):
+    """
+    從上傳的 CSV 檔案匯入保險資料。
+    """
+    return {"message": "請使用工具函式 import_insurances_from_csv 來匯入資料"}

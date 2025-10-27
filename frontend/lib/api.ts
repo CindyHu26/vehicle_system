@@ -1,0 +1,202 @@
+/**
+ * API 客戶端
+ * 封裝對後端 API 的呼叫
+ */
+import axios from 'axios';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Request interceptor
+api.interceptors.request.use(
+  (config) => {
+    // 可以在這裡加入認證 token
+    // const token = localStorage.getItem('token');
+    // if (token) {
+    //   config.headers.Authorization = `Bearer ${token}`;
+    // }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Response interceptor
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // 處理錯誤
+    if (error.response?.status === 401) {
+      // 處理未授權
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Types
+export interface Employee {
+  id: number;
+  emp_no: string;
+  name: string;
+  dept_name?: string;
+  license_class?: string;
+  status: 'active' | 'inactive';
+  created_at: string;
+}
+
+export interface Vehicle {
+  id: number;
+  plate_no: string;
+  vin?: string;
+  make: string;
+  model: string;
+  year: number;
+  powertrain?: string;
+  displacement_cc: number;
+  seats: number;
+  vehicle_type: 'car' | 'motorcycle' | 'van' | 'truck' | 'ev_scooter' | 'other';
+  status: 'active' | 'maintenance' | 'idle' | 'retired';
+  created_at: string;
+  documents: VehicleDocument[];
+  assets: VehicleAsset[];
+  insurances: Insurance[];
+  inspections: Inspection[];
+  violations: Violation[];
+}
+
+export interface VehicleDocument {
+  id: number;
+  vehicle_id: number;
+  doc_type: string;
+  file_url: string;
+  sha256?: string;
+  issued_on?: string;
+  expires_on?: string;
+  tags?: string;
+}
+
+export interface VehicleAsset {
+  id: number;
+  vehicle_id?: number;
+  asset_type: string;
+  serial_no: string;
+  status: string;
+  expires_on?: string;
+  notes?: string;
+}
+
+export interface Insurance {
+  id: number;
+  vehicle_id: number;
+  policy_type: string;
+  policy_no: string;
+  insurer_id?: number;
+  coverage?: string;
+  effective_on: string;
+  expires_on: string;
+  premium?: string;
+}
+
+export interface Inspection {
+  id: number;
+  vehicle_id: number;
+  inspection_type: string;
+  result: string;
+  inspection_date?: string;
+  next_due_date?: string;
+}
+
+export interface Violation {
+  id: number;
+  vehicle_id: number;
+  driver_id?: number;
+  law_ref?: string;
+  violation_date: string;
+  amount: string;
+  points: number;
+  paid_on?: string;
+  status: string;
+}
+
+export interface Reservation {
+  id: number;
+  requester_id: number;
+  vehicle_id?: number;
+  purpose: string;
+  vehicle_type_pref?: string;
+  start_ts: string;
+  end_ts: string;
+  status: string;
+  destination?: string;
+  created_at: string;
+}
+
+export interface WorkOrder {
+  id: number;
+  vehicle_id: number;
+  type: string;
+  status: string;
+  vendor_id?: number;
+  scheduled_on?: string;
+  completed_on?: string;
+  cost_amount?: string;
+  notes?: string;
+}
+
+// API functions
+export const apiClient = {
+  // Employees
+  getEmployees: () => api.get<Employee[]>('/api/v1/employees/'),
+  getEmployee: (id: number) => api.get<Employee>(`/api/v1/employees/${id}`),
+  createEmployee: (data: any) => api.post<Employee>('/api/v1/employees/', data),
+
+  // Vehicles
+  getVehicles: () => api.get<Vehicle[]>('/api/v1/vehicles/'),
+  getVehicle: (id: number) => api.get<Vehicle>(`/api/v1/vehicles/${id}`),
+  getVehicleByPlate: (plateNo: string) => api.get<Vehicle>(`/api/v1/vehicles/plate/${plateNo}`),
+  createVehicle: (data: any) => api.post<Vehicle>('/api/v1/vehicles/', data),
+  updateVehicle: (id: number, data: any) => api.put<Vehicle>(`/api/v1/vehicles/${id}`, data),
+
+  // Reservations
+  getReservations: () => api.get<Reservation[]>('/api/v1/reservations/'),
+  getReservation: (id: number) => api.get<Reservation>(`/api/v1/reservations/${id}`),
+  createReservation: (data: any) => api.post<Reservation>('/api/v1/reservations/', data),
+  updateReservation: (id: number, data: any) => api.patch<Reservation>(`/api/v1/reservations/${id}/`, data),
+
+  // Work Orders
+  getWorkOrders: (vehicleId?: number) => 
+    vehicleId 
+      ? api.get<WorkOrder[]>(`/api/v1/vehicles/${vehicleId}/work-orders/`)
+      : api.get<WorkOrder[]>('/api/v1/work-orders/'),
+  createWorkOrder: (data: any) => api.post<WorkOrder>('/api/v1/work-orders/', data),
+
+  // Insurances
+  getInsurances: (vehicleId: number) => api.get<Insurance[]>(`/api/v1/vehicles/${vehicleId}/insurances/`),
+  createInsurance: (data: any) => api.post<Insurance>('/api/v1/insurances/', data),
+
+  // Inspections
+  getInspections: (vehicleId: number) => api.get<Inspection[]>(`/api/v1/vehicles/${vehicleId}/inspections/`),
+  createInspection: (data: any) => api.post<Inspection>('/api/v1/inspections/', data),
+
+  // Violations
+  createViolation: (data: any) => api.post<Violation>('/api/v1/violations/', data),
+
+  // Analytics
+  getVehicleUtilization: (vehicleId: number, startDate: string, endDate: string) =>
+    api.get(`/api/v1/analytics/vehicle-utilization/${vehicleId}`, {
+      params: { start_date: startDate, end_date: endDate },
+    }),
+  getComplianceReport: (daysAhead: number = 30) =>
+    api.get('/api/v1/analytics/compliance-report', { params: { days_ahead: daysAhead } }),
+};
+
+export default api;
+
+

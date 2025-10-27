@@ -64,6 +64,11 @@ class Reservation(ReservationBase):
     
     model_config = ConfigDict(from_attributes=True)
 
+class ReservationUpdate(BaseModel):
+    """(U) 更新預約時用的 Schema"""
+    status: Optional[ReservationStatusEnum] = None
+    vehicle_id: Optional[int] = None
+
 class ViolationBase(BaseModel):
     vehicle_id: int
     driver_id: int | None = None
@@ -111,8 +116,9 @@ class Employee(EmployeeBase):
 # --- VehicleDocument Schemas ---
 class VehicleDocumentBase(BaseModel):
     doc_type: DocumentTypeEnum
-    file_url: str
-    sha256: str | None = None
+    # (!!! file_url 和 sha256 移到下面 !!!)
+    # file_url: str 
+    # sha256: str | None = None
     issued_on: date | None = None
     expires_on: date | None = None
     tags: str | None = None
@@ -120,6 +126,8 @@ class VehicleDocumentBase(BaseModel):
 class VehicleDocumentCreate(VehicleDocumentBase):
     # 建立時，我們稍後會從 API 路徑 (path) 傳入 vehicle_id
     # 所以 body 裡面不需要 vehicle_id
+    # 現在只需要文件的元資料
+    # file_url 和 sha256 會在 API 層從檔案上傳結果取得
     pass
 
 class VehicleDocument(VehicleDocumentBase):
@@ -127,9 +135,9 @@ class VehicleDocument(VehicleDocumentBase):
     id: int
     vehicle_id: int
     created_at: datetime
-    
+    file_url: str 
+    sha256: str | None = None    
     model_config = ConfigDict(from_attributes=True)
-
 
 class VehicleAssetBase(BaseModel):
     asset_type: AssetTypeEnum
@@ -215,7 +223,6 @@ class WorkOrder(WorkOrderBase):
     model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True) # 允許 Decimal
 
 # --- Insurance Schemas ---
-
 class InsuranceBase(BaseModel):
     vehicle_id: int
     policy_type: InsurancePolicyTypeEnum
@@ -238,9 +245,7 @@ class Insurance(InsuranceBase):
     
     model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
-
 # --- TaxFee Schemas ---
-
 class TaxFeeBase(BaseModel):
     vehicle_id: int
     fee_type: FeeTypeEnum
@@ -259,9 +264,7 @@ class TaxFee(TaxFeeBase):
     
     model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
-
 # --- Inspection Schemas ---
-
 class InspectionBase(BaseModel):
     vehicle_id: int
     inspection_type: InspectionTypeEnum
