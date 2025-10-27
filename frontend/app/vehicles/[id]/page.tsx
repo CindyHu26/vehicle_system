@@ -32,12 +32,17 @@ export default function VehicleDetailPage() {
           <h1 className="text-3xl font-bold">{vehicle.plate_no}</h1>
           <p className="text-gray-600">{vehicle.make} {vehicle.model} ({vehicle.year})</p>
         </div>
-        <Link
-          href="/vehicles"
-          className="text-gray-600 hover:text-gray-900"
-        >
-          ← 返回列表
-        </Link>
+        <div className="flex space-x-4">
+            <Link
+                href={`/vehicles/${vehicleId}/edit`} // <-- 連結到編輯頁面
+                className="bg-yellow-500 text-white px-4 py-2 rounded-lg hover:bg-yellow-600"
+            >
+                編輯
+            </Link>
+            <Link href="/vehicles" className="text-gray-600 hover:text-gray-900 flex items-center">
+                ← 返回列表
+            </Link>
+        </div>
       </div>
 
       {/* Basic Info */}
