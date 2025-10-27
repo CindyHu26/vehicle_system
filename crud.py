@@ -9,6 +9,7 @@ import json
 from pydantic import BaseModel
 from decimal import Decimal
 from copy import deepcopy
+import enum
 
 # --- Employee CRUD ---
 def get_employee(db: Session, employee_id: int):
@@ -399,44 +400,25 @@ def create_audit_log(
     """
     (Helper) 建立一筆稽核軌跡
     """
-    
     def serialize_value(value):
-        """ 將 Pydantic or SQLAlchemy 物件轉為字典 """
-        if isinstance(value, BaseModel):
-            return value.model_dump(mode="json")
-        if isinstance(value, models.Base):
-            # 簡易轉換 (僅限欄位)
-            # 警告: 這不會轉換 relationship
-            data = {c.name: getattr(value, c.name) for c in value.__table__.columns}
-            # 手動轉日期/Decimal (因為 json.dumps 不支援)
-            for k, v in data.items():
-                if isinstance(v, (datetime, date)):
-                    data[k] = v.isoformat()
-                if isinstance(v, Decimal):
-                    data[k] = str(v)
-            return data
-        return None
+            """ 將 Pydantic or SQLAlchemy 物件轉為字典 """
+            if isinstance(value, BaseModel):
+                return value.model_dump(mode="json")
+            if isinstance(value, models.Base):
+                data = {c.name: getattr(value, c.name) for c in value.__table__.columns}
 
-    try:
-        db_log = models.AuditLog(
-            actor_id=actor_id,
-            action=action,
-            entity=entity,
-            entity_id=entity_id,
-            old_value=serialize_value(old_value),
-            new_value=serialize_value(new_value),
-            ip_address=ip_address,
-            user_agent=user_agent
-        )
-        db.add(db_log)
-        # 注意：我們在這裡不 'commit'，
-        # 讓呼叫者 (e.g., create_violation) 決定何時 commit
-        # 確保 log 和操作在同一個 transaction
-        return db_log
-    except Exception as e:
-        print(f"寫入 Audit Log 失敗: {e}")
-        # 不應讓 Log 失敗導致主操作失敗，但要記錄
-        return None
+                # (!!! 修改以下迴圈 !!!)
+                # 手動轉日期/Decimal/Enum
+                for k, v in data.items():
+                    if isinstance(v, (datetime, date)):
+                        data[k] = v.isoformat()
+                    elif isinstance(v, Decimal): # 使用 elif
+                        data[k] = str(v)
+                    elif isinstance(v, enum.Enum): # (!!! 新增這個檢查 !!!)
+                        data[k] = v.value # 將 Enum 轉為其 .value (例如 "active")
+
+            return data
+            return None
 
 def get_audit_logs(db: Session, skip: int = 0, limit: int = 100):
     """ (R) 查詢稽核軌跡 (含操作者資訊) """

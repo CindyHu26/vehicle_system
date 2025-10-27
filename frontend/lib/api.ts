@@ -40,6 +40,37 @@ api.interceptors.response.use(
   }
 );
 
+export interface Trip {
+  id: number;
+  reservation_id: number;
+  vehicle_id: number;
+  driver_id: number;
+  odometer_start?: number;
+  odometer_end?: number;
+  notes?: string;
+  returned_at: string;
+}
+
+export interface TaxFee {
+  id: number;
+  vehicle_id: number;
+  fee_type: string;
+  period_start: string;
+  period_end: string;
+  amount: string; // Decimal 會被轉為 string
+  paid_on?: string;
+}
+
+export interface MaintenancePlan {
+  id: number;
+  vehicle_id: number;
+  policy_name: string;
+  interval_km?: number;
+  next_due_odometer?: number;
+  interval_months?: number;
+  next_due_date?: string;
+}
+
 // Types
 export interface Employee {
   id: number;
@@ -64,11 +95,23 @@ export interface Vehicle {
   vehicle_type: 'car' | 'motorcycle' | 'van' | 'truck' | 'ev_scooter' | 'other';
   status: 'active' | 'maintenance' | 'idle' | 'retired';
   created_at: string;
+
+  updated_at?: string;
+  acquired_on?: string; 
+  helmet_required: boolean;
+
+  // 關聯欄位
   documents: VehicleDocument[];
   assets: VehicleAsset[];
   insurances: Insurance[];
   inspections: Inspection[];
   violations: Violation[];
+  maintenance_plans: MaintenancePlan[];
+  work_orders: WorkOrder[];
+  taxes_fees: TaxFee[];
+  reservations: Reservation[];
+  trips: Trip[];
+  // --------------------------------
 }
 
 export interface VehicleDocument {
@@ -163,6 +206,7 @@ export const apiClient = {
   getVehicleByPlate: (plateNo: string) => api.get<Vehicle>(`/api/v1/vehicles/plate/${plateNo}`),
   createVehicle: (data: any) => api.post<Vehicle>('/api/v1/vehicles/', data),
   updateVehicle: (id: number, data: any) => api.put<Vehicle>(`/api/v1/vehicles/${id}`, data),
+  deleteVehicle: (id: number) => api.delete<Vehicle>(`/api/v1/vehicles/${id}`),
 
   // Reservations
   getReservations: () => api.get<Reservation[]>('/api/v1/reservations/'),

@@ -99,8 +99,8 @@ export default function EditVehiclePage() {
     }
   }, [vehicle, reset]);
 
-  // 設定 mutation (呼叫更新 API)
-  const mutation = useMutation({
+  // 設定 react-query mutation (更新 API)
+  const updateMutation = useMutation({
     mutationFn: (data: VehicleFormData) => {
         const { plate_no, ...updateData } = data; // 排除車牌
         const payload = {
@@ -125,12 +125,43 @@ export default function EditVehiclePage() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: () => apiClient.deleteVehicle(vehicleId), // 呼叫刪除 API
+    onSuccess: () => {
+      // 成功刪除後...
+      queryClient.invalidateQueries({ queryKey: ['vehicles'] }); // 讓列表快取失效
+      router.push('/vehicles'); // 導回列表頁
+    },
+    onError: (error: any) => {
+      console.error("刪除車輛失敗:", error);
+      // 後端返回的 400 錯誤會包含 detail 訊息
+      const errorMsg = error.response?.data?.detail || error.message;
+      alert(`刪除失敗: ${errorMsg}`);
+    },
+  });
+
   const onSubmit = (data: VehicleFormData) => {
-    mutation.mutate(data);
+    updateMutation.mutate(data);
+  };
+  const handleDelete = () => {
+    // 確保 vehicle 物件存在後才繼續
+    if (!vehicle) {
+      return; 
+    }
+    if (window.confirm(`您確定要永久刪除車輛 ${vehicle.plate_no} 嗎？\n此操作無法復原。`)) {
+      deleteMutation.mutate();
+    }
   };
 
   // 選項 (與新增頁面相同)
-  const vehicleTypeOptions = [ /* ... 與新增頁面相同 ... */ ];
+  const vehicleTypeOptions = [
+    { value: 'car', label: '汽車' },
+    { value: 'motorcycle', label: '機車' },
+    { value: 'van', label: '廂型車' },
+    { value: 'truck', label: '卡車' },
+    { value: 'ev_scooter', label: '電動機車' },
+    { value: 'other', label: '其他' },
+  ];
   const vehicleStatusOptions = [ // 狀態選項
     { value: 'active', label: '啟用中' },
     { value: 'maintenance', label: '維護中' },
@@ -220,13 +251,24 @@ export default function EditVehiclePage() {
             {errors.acquired_on && <p className="mt-1 text-sm text-red-600">{errors.acquired_on.message}</p>}
           </div>
 
-          <div className="flex justify-end">
+          <div className="flex justify-between items-center">
+            {/* 刪除按鈕 (靠左) */}
+            <button
+              type="button" // 必須是 type="button" 才不會觸發 form submit
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+              className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
+            >
+              {deleteMutation.isPending ? '刪除中...' : '刪除此車輛'}
+            </button>
+            
+            {/* 更新按鈕 (靠右) */}
             <button
               type="submit"
-              disabled={mutation.isPending}
+              disabled={updateMutation.isPending}
               className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50"
             >
-              {mutation.isPending ? '更新中...' : '更新'}
+              {updateMutation.isPending ? '更新中...' : '更新'}
             </button>
           </div>
         </form>
