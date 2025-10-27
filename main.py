@@ -54,7 +54,7 @@ def get_db():
         db.close()
 
 # --- API Endpoints (API 路由) ---
-# --- Employees API (!!! 修改 !!!) ---
+# --- Employees API ---
 @app.post("/api/v1/employees/", response_model=schemas.Employee, summary="建立新員工")
 def create_employee_api(employee: schemas.EmployeeCreate, db: Session = Depends(get_db)):
     db_employee = crud.get_employee_by_emp_no(db, emp_no=employee.emp_no)
@@ -65,13 +65,11 @@ def create_employee_api(employee: schemas.EmployeeCreate, db: Session = Depends(
     new_emp = crud.create_employee(db=db, employee=employee)
     return crud.get_employee(db, employee_id=new_emp.id)
 
-
 @app.get("/api/v1/employees/", response_model=List[schemas.Employee], summary="查詢員工列表")
 def read_employees_api(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     # crud.get_employees 現在會自動載入所有關聯
     employees = crud.get_employees(db, skip=skip, limit=limit)
     return employees
-
 
 @app.get("/api/v1/employees/{employee_id}", response_model=schemas.Employee, summary="查詢單一員工")
 def read_employee_api(employee_id: int, db: Session = Depends(get_db)):
@@ -81,13 +79,11 @@ def read_employee_api(employee_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="找不到該員工")
     return db_employee
 
-
 @app.get("/api/v1/vehicles/", response_model=List[schemas.Vehicle], summary="查詢車輛列表")
 def read_vehicles_api(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     # crud.get_vehicles 現在會自動載入所有關聯
     vehicles = crud.get_vehicles(db, skip=skip, limit=limit)
     return vehicles
-
 
 @app.get("/api/v1/vehicles/{vehicle_id}", response_model=schemas.Vehicle, summary="查詢單一車輛")
 def read_vehicle_api(vehicle_id: int, db: Session = Depends(get_db)):
@@ -97,8 +93,102 @@ def read_vehicle_api(vehicle_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="找不到該車輛")
     return db_vehicle
 
-# --- Vehicle Documents API ---
+# --- Vehicles API (!!! 新增 Update 和 Delete !!!) ---
 
+@app.post("/api/v1/vehicles/", response_model=schemas.Vehicle, summary="建立新車輛")
+def create_vehicle_api(vehicle: schemas.VehicleCreate, db: Session = Depends(get_db)):
+    db_vehicle = crud.get_vehicle_by_plate_no(db, plate_no=vehicle.plate_no)
+    if db_vehicle:
+        raise HTTPException(status_code=400, detail=f"車牌號碼 {vehicle.plate_no} 已存在")
+    new_vehicle = crud.create_vehicle(db=db, vehicle=vehicle)
+    return crud.get_vehicle(db, vehicle_id=new_vehicle.id)
+
+@app.put("/api/v1/vehicles/{vehicle_id}", 
+         response_model=schemas.Vehicle, 
+         summary="更新車輛資料 (完整替換)")
+def update_vehicle_api(
+    vehicle_id: int, 
+    vehicle_update: schemas.VehicleUpdate, # 使用 Update Schema
+    db: Session = Depends(get_db),
+    actor_id: int = Depends(get_current_actor_id)
+):
+    """
+    更新指定 ID 的車輛資料。
+    注意：PUT 通常表示「完整替換」，但我們實作成「部分更新」。
+    (更符合語意的應該是 PATCH，但 PUT 較常用)
+    
+    會記錄 Audit Log。
+    """
+    updated_vehicle = crud.update_vehicle(
+        db=db, 
+        vehicle_id=vehicle_id, 
+        vehicle_update=vehicle_update,
+        actor_id=actor_id
+    )
+    if updated_vehicle is None:
+        raise HTTPException(status_code=404, detail="找不到該車輛")
+    
+    # crud.update_vehicle 返回的是更新後的 SQLAlchemy 物件
+    # 我們需要重新查詢一次，以獲得包含所有關聯的 Pydantic 物件
+    return crud.get_vehicle(db, vehicle_id=vehicle_id)
+
+@app.delete("/api/v1/vehicles/{vehicle_id}", 
+            response_model=schemas.Vehicle, # 回傳被刪除的資料
+            summary="刪除車輛")
+def delete_vehicle_api(
+    vehicle_id: int,
+    db: Session = Depends(get_db),
+    actor_id: int = Depends(get_current_actor_id)
+):
+    """
+    刪除指定 ID 的車輛。
+    
+    警告：如果該車輛仍有關聯的預約、工單等，刪除可能會失敗 (資料庫限制)。
+    建議優先使用 PUT 將 status 更新為 'retired' (軟刪除)。
+    
+    會記錄 Audit Log。
+    """
+    try:
+        deleted_vehicle_data = crud.delete_vehicle(
+            db=db, 
+            vehicle_id=vehicle_id, 
+            actor_id=actor_id
+        )
+        if deleted_vehicle_data is None:
+            raise HTTPException(status_code=404, detail="找不到該車輛")
+        
+        # 因為物件已被刪除，我們無法用 get_vehicle 查詢
+        # 直接用刪除前回傳的資料轉換成 Pydantic Schema 回傳
+        # (注意：這可能不包含完整的關聯，取決於 deepcopy 的深度)
+        return schemas.Vehicle.model_validate(deleted_vehicle_data) 
+        
+    except Exception as e:
+        # 捕捉 ForeignKey 錯誤等
+        raise HTTPException(status_code=400, detail=f"刪除失敗: {e}")
+
+@app.get("/api/v1/vehicles/", response_model=List[schemas.Vehicle], summary="查詢車輛列表")
+def read_vehicles_api(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """
+    讀取車輛列表，支援分頁。
+    會一併回傳所有關聯資料 (文件、備品、保養計畫、工單、合規紀錄、預約、行程)。
+    """
+    # crud.get_vehicles 現在會自動載入所有關聯
+    vehicles = crud.get_vehicles(db, skip=skip, limit=limit)
+    return vehicles
+
+@app.get("/api/v1/vehicles/{vehicle_id}", response_model=schemas.Vehicle, summary="查詢單一車輛")
+def read_vehicle_api(vehicle_id: int, db: Session = Depends(get_db)):
+    """
+    依據資料庫 ID 查詢特定車輛。
+    會一併回傳所有關聯資料。
+    """
+    # crud.get_vehicle 現在會自動載入所有關聯
+    db_vehicle = crud.get_vehicle(db, vehicle_id=vehicle_id)
+    if db_vehicle is None:
+        raise HTTPException(status_code=404, detail="找不到該車輛")
+    return db_vehicle
+
+# --- Vehicle Documents API ---
 @app.post("/api/v1/vehicles/{vehicle_id}/documents/", 
           response_model=schemas.VehicleDocument, 
           summary="為車輛新增文件")
@@ -121,7 +211,6 @@ def create_document_for_vehicle(
         
     return crud.create_vehicle_document(db=db, document=document, vehicle_id=vehicle_id)
 
-
 @app.get("/api/v1/vehicles/{vehicle_id}/documents/", 
          response_model=List[schemas.VehicleDocument],
          summary="查詢特定車輛的所有文件")
@@ -141,7 +230,6 @@ def read_vehicle_documents(
 
 
 # --- Vehicle Assets API ---
-
 @app.post("/api/v1/assets/", 
           response_model=schemas.VehicleAsset, 
           summary="建立備品資產 (如安全帽)")
@@ -161,7 +249,6 @@ def create_asset_api(
         # 捕捉 crud 中拋出的錯誤 (e.g., 編號重複, 車輛不存在)
         raise HTTPException(status_code=400, detail=str(e))
 
-
 @app.get("/api/v1/assets/", 
          response_model=List[schemas.VehicleAsset],
          summary="查詢備品資產列表")
@@ -177,7 +264,6 @@ def read_assets_api(
     return assets
 
 # --- Vendors API ---
-
 @app.post("/api/v1/vendors/", 
           response_model=schemas.Vendor, 
           summary="建立新供應商")
@@ -189,7 +275,6 @@ def create_vendor_api(
     建立新供應商 (維修廠、保險公司等)。
     """
     return crud.create_vendor(db=db, vendor=vendor)
-
 
 @app.get("/api/v1/vendors/", 
          response_model=List[schemas.Vendor], 

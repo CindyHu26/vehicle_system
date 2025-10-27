@@ -300,6 +300,24 @@ class VehicleBase(BaseModel):
 class VehicleCreate(VehicleBase):
     pass
 
+class VehicleUpdate(BaseModel):
+    """(U) 更新車輛時用的 Schema"""
+    # 允許更新 VIN, 狀態, 里程數 (未來), etc.
+    # 車牌 (plate_no) 通常不允許修改
+    vin: Optional[str] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
+    year: Optional[int] = None
+    powertrain: Optional[str] = None
+    displacement_cc: Optional[int] = None
+    seats: Optional[int] = None
+    owned_or_leased: Optional[str] = None
+    acquired_on: Optional[date] = None
+    status: Optional[VehicleStatusEnum] = None
+    helmet_required: Optional[bool] = None
+    
+    # model_config = ConfigDict(extra='forbid')
+
 class Vehicle(VehicleBase):
     """(R) 讀取/回傳時用的 Schema"""
     id: int

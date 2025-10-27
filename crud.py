@@ -8,6 +8,7 @@ from decimal import Decimal
 import json
 from pydantic import BaseModel
 from decimal import Decimal
+from copy import deepcopy
 
 # --- Employee CRUD ---
 def get_employee(db: Session, employee_id: int):
@@ -86,6 +87,85 @@ def create_vehicle(db: Session, vehicle: schemas.VehicleCreate):
     db.commit()
     db.refresh(db_vehicle)
     return db_vehicle
+
+def update_vehicle(
+    db: Session, 
+    vehicle_id: int, 
+    vehicle_update: schemas.VehicleUpdate,
+    actor_id: int # (!!!) 需要知道是誰更新的
+) -> models.Vehicle | None:
+    """ (U) 更新車輛資料 """
+    db_vehicle = get_vehicle(db, vehicle_id)
+    if not db_vehicle:
+        return None # or raise HTTPException(404) in API layer
+
+    # (!!! Audit Log: 記錄舊值 !!!)
+    # 我們需要複製一份當前的狀態，否則它會被 SQLAlchemy 直接修改掉
+    old_vehicle_data = deepcopy(db_vehicle)
+
+    # 將 Pydantic schema 中的資料更新到 SQLAlchemy model instance
+    update_data = vehicle_update.model_dump(exclude_unset=True) # exclude_unset=True 只拿有傳入的欄位
+    for key, value in update_data.items():
+        setattr(db_vehicle, key, value)
+        
+    db.add(db_vehicle)
+    
+    # (!!! Audit Log: 記錄新值 !!!)
+    # 在 commit 前呼叫，與主操作在同一個 transaction
+    create_audit_log(
+        db=db,
+        actor_id=actor_id,
+        action="UPDATE",
+        entity="Vehicle",
+        entity_id=vehicle_id,
+        old_value=old_vehicle_data, # 傳入複製的舊物件
+        new_value=db_vehicle       # 傳入被修改後的物件
+    )
+    
+    try:
+        db.commit()
+        db.refresh(db_vehicle)
+        return db_vehicle
+    except Exception as e:
+        db.rollback()
+        raise e
+
+def delete_vehicle(
+    db: Session, 
+    vehicle_id: int,
+    actor_id: int # (!!!) 需要知道是誰刪除的
+) -> models.Vehicle | None:
+    """ (D) 刪除車輛 """
+    db_vehicle = get_vehicle(db, vehicle_id)
+    if not db_vehicle:
+        return None
+
+    # (!!! Audit Log: 記錄被刪除的值 !!!)
+    old_vehicle_data = deepcopy(db_vehicle)
+    
+    # (!!! 警告 !!!)
+    # 直接刪除可能會因為 ForeignKey 限制而出錯 (e.g., 如果還有預約單關聯)
+    # 更好的做法是將 status 改為 'retired' (軟刪除)
+    # 我們先示範硬刪除，但要加上 Audit Log
+    
+    create_audit_log(
+        db=db,
+        actor_id=actor_id,
+        action="DELETE",
+        entity="Vehicle",
+        entity_id=vehicle_id,
+        old_value=old_vehicle_data,
+        new_value=None # 刪除後沒有新值
+    )
+    
+    try:
+        db.delete(db_vehicle)
+        db.commit()
+        return old_vehicle_data # 回傳被刪除前的資料
+    except Exception as e:
+        # 如果因為 ForeignKey 而刪除失敗，Log 也會一起 rollback
+        db.rollback()
+        raise e # 讓 API 層知道出錯了
 
 def create_vehicle_document(
     db: Session, 
@@ -494,6 +574,68 @@ def get_reservations(db: Session, skip: int = 0, limit: int = 100):
         joinedload(models.Reservation.trip)
     ).offset(skip).limit(limit).all()
 
+def update_reservation_status(
+    db: Session,
+    reservation_id: int,
+    status_update: schemas.ReservationUpdate, # 使用新的 Update Schema
+    actor_id: int
+) -> models.Reservation | None:
+    """ (U) 更新預約狀態 (e.g., 核准/拒絕/取消) """
+    db_reservation = get_reservation(db, reservation_id)
+    if not db_reservation:
+        return None
+
+    old_reservation_data = deepcopy(db_reservation)
+
+    # (!!! 加入業務邏輯 !!!)
+    # 例如：只有 pending 狀態的才能被 approved/rejected
+    # 例如：只有 approved/pending 狀態的才能被 cancelled
+    # (我們先簡化，允許任意更新)
+
+    update_data = status_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        # (!!! 額外檢查: 更新 vehicle_id 時要檢查衝突 !!!)
+        if key == 'vehicle_id' and value is not None and value != db_reservation.vehicle_id:
+             # 檢查新指派的車輛在該時段是否有衝突 (複製 create_reservation 的邏輯)
+            existing_reservation = db.query(models.Reservation).filter(
+                models.Reservation.vehicle_id == value,
+                models.Reservation.status == models.ReservationStatusEnum.approved,
+                models.Reservation.start_ts < db_reservation.end_ts,
+                models.Reservation.end_ts > db_reservation.start_ts,
+                models.Reservation.id != reservation_id # 排除自己
+            ).first()
+            if existing_reservation:
+                raise ValueError(f"指派的車輛 {value} 在該時段已被 {existing_reservation.id} 預約")
+
+        setattr(db_reservation, key, value)
+        
+    # 如果更新了 vehicle_id，且原狀態是 pending，則改為 approved
+    if 'vehicle_id' in update_data and db_reservation.status == models.ReservationStatusEnum.pending:
+        db_reservation.status = models.ReservationStatusEnum.approved
+        
+    # 如果狀態被更新為 cancelled 或 rejected，清空 vehicle_id
+    if 'status' in update_data and status_update.status in (models.ReservationStatusEnum.cancelled, models.ReservationStatusEnum.rejected):
+        db_reservation.vehicle_id = None
+
+    db.add(db_reservation)
+
+    create_audit_log(
+        db=db,
+        actor_id=actor_id,
+        action="UPDATE",
+        entity="Reservation",
+        entity_id=reservation_id,
+        old_value=old_reservation_data,
+        new_value=db_reservation
+    )
+
+    try:
+        db.commit()
+        db.refresh(db_reservation)
+        return db_reservation
+    except Exception as e:
+        db.rollback()
+        raise e
 
 # --- Trip CRUD ---
 def create_trip_for_reservation(
