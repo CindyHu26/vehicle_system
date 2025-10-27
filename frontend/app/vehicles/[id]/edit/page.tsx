@@ -153,7 +153,6 @@ export default function EditVehiclePage() {
     }
   };
 
-  // 選項 (與新增頁面相同)
   const vehicleTypeOptions = [
     { value: 'car', label: '汽車' },
     { value: 'motorcycle', label: '機車' },
