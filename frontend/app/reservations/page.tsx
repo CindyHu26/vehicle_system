@@ -2,9 +2,9 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { apiClient, Employee, Reservation } from '@/lib/api'; // (!!!) 匯入 Employee 和 Reservation 型別
+import { apiClient, Employee, Reservation } from '@/lib/api'; // 匯入型別
 import { format } from 'date-fns';
-import Link from 'next/link'; // (!!!) 確保匯入 Link
+import Link from 'next/link'; // 匯入 Link
 
 export default function ReservationsPage() {
   // 1. 載入預約列表
@@ -16,7 +16,7 @@ export default function ReservationsPage() {
     },
   });
 
-  // 2. (!!! 新增) 載入員工列表，用於顯示姓名
+  // 2. 載入員工列表 (用於顯示姓名)
   const { data: employees, isLoading: isLoadingEmployees } = useQuery<Employee[]>({
     queryKey: ['employees'],
     queryFn: async () => {
@@ -59,7 +59,6 @@ export default function ReservationsPage() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">借車申請</h1>
-        {/* (!!! 新增申請按鈕 !!!) */}
         <Link
           href="/reservations/new"
           className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700"
@@ -77,7 +76,7 @@ export default function ReservationsPage() {
                   ID
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  申請人 {/* (!!!) 文字更新 */}
+                  申請人
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   用途
@@ -92,7 +91,7 @@ export default function ReservationsPage() {
                   狀態
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  操作 {/* (!!! 新增欄位 !!!) */}
+                  操作
                 </th>
               </tr>
             </thead>
@@ -103,7 +102,6 @@ export default function ReservationsPage() {
                     {reservation.id}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {/* (!!!) 改為顯示姓名 */}
                     {getEmployeeName(reservation.requester_id)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -122,7 +120,6 @@ export default function ReservationsPage() {
                       {reservation.status}
                     </span>
                   </td>
-                  {/* (!!! 新增 <td> !!!) */}
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <Link
                       href={`/reservations/${reservation.id}/edit`}

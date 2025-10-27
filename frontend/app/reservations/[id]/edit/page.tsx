@@ -7,14 +7,14 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useParams } from 'next/navigation';
-import { apiClient, Reservation, Vehicle, Employee } from '@/lib/api'; // 匯入型別
+import { apiClient, Reservation, Vehicle, Employee } from '@/lib/api';
 import { useEffect } from 'react';
 import { format } from 'date-fns';
 
 // 1. Zod Schema (對應後端的 ReservationUpdate)
 const reservationUpdateSchema = z.object({
   status: z.enum(['pending', 'approved', 'rejected', 'in_progress', 'completed', 'cancelled']),
-  vehicle_id: z.preprocess( // 允許空字串轉為 undefined
+  vehicle_id: z.preprocess(
     (val) => (val === "" || val === null ? null : val),
     z.coerce.number().int().optional().nullable()
   ),
@@ -62,8 +62,8 @@ export default function EditReservationPage() {
   useEffect(() => {
     if (reservation) {
       reset({
-        status: reservation.status as any, // 設置當前狀態
-        vehicle_id: reservation.vehicle_id ?? undefined, // 設置當前指派的車輛
+        status: reservation.status as any,
+        vehicle_id: reservation.vehicle_id ?? undefined,
       });
     }
   }, [reservation, reset]);
@@ -75,7 +75,7 @@ export default function EditReservationPage() {
             ...data,
             vehicle_id: data.vehicle_id ? Number(data.vehicle_id) : null,
         };
-      return apiClient.updateReservation(reservationId, payload); // 呼叫更新 API
+      return apiClient.updateReservation(reservationId, payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reservations'] });
@@ -85,7 +85,7 @@ export default function EditReservationPage() {
     onError: (error: any) => {
       console.error("更新預約失敗:", error);
       const errorMsg = error.response?.data?.detail || error.message;
-      alert(`更新失敗: ${errorMsg}`); // 顯示後端錯誤 (例如衝突)
+      alert(`更新失敗: ${errorMsg}`);
     },
   });
 
@@ -108,7 +108,8 @@ export default function EditReservationPage() {
   };
   
   const getVehiclePlate = (id: number) => {
-      return vehicles?.find(v => v.id === id)?.plate_no || `車輛ID: ${id}`;
+      const vehicle = vehicles?.find(v => v.id === id);
+      return vehicle ? vehicle.plate_no : `車輛ID: ${id}`;
   }
 
   if (isLoadingReservation || isLoadingEmployees || isLoadingVehicles) {
@@ -162,12 +163,17 @@ export default function EditReservationPage() {
       {/* 編輯表單 */}
       <div className="bg-white rounded-lg shadow p-8">
         <h2 className="text-xl font-semibold mb-4">管理操作</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          若要「取消申請」，請將狀態改為 '已取消'。
+          <br />
+          若要「編輯申請」，請指派/變更車輛，或將狀態改為 '已拒絕'。
+        </p>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
 
           {/* 狀態 (編輯/取消) */}
           <div>
             <label htmlFor="status" className="block text-sm font-medium text-gray-700">
-              更新狀態 (例如：取消預約) <span className="text-red-600">*</span>
+              更新狀態 <span className="text-red-600">*</span>
             </label>
             <select
               id="status"
