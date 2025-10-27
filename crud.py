@@ -292,6 +292,14 @@ def get_work_order(db: Session, work_order_id: int):
         joinedload(models.WorkOrder.vendor) # 主動載入供應商
     ).filter(models.WorkOrder.id == work_order_id).first()
 
+def get_work_orders(db: Session, skip: int = 0, limit: int = 100):
+    """ (R) 查詢多筆工單 (分頁)，並載入供應商和車輛資訊 """
+    return db.query(models.WorkOrder).options(
+        joinedload(models.WorkOrder.vendor), # 載入供應商
+        joinedload(models.WorkOrder.vehicle) # 同時載入車輛資訊，方便前端顯示車牌
+    ).order_by(models.WorkOrder.created_at.desc()) \
+     .offset(skip).limit(limit).all()
+
 def get_work_orders_for_vehicle(db: Session, vehicle_id: int):
     """ (R) 查詢特定車輛的所有工單 (並載入供應商資訊) """
     return db.query(models.WorkOrder).options(

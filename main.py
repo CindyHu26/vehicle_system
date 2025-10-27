@@ -477,6 +477,19 @@ def read_work_order_api(
         raise HTTPException(status_code=404, detail="找不到該工單")
     return db_work_order
 
+@app.get("/api/v1/work-orders/",
+         response_model=List[schemas.WorkOrder],
+         summary="查詢工單列表")
+def read_work_orders_api(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """
+    取得系統中所有的工單清單 (分頁)，包含供應商和車輛資訊。
+    """
+    work_orders = crud.get_work_orders(db, skip=skip, limit=limit)
+    return work_orders
 
 @app.get("/api/v1/vehicles/{vehicle_id}/work-orders/", 
          response_model=List[schemas.WorkOrder],

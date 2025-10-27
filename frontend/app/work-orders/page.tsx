@@ -2,35 +2,38 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { apiClient, WorkOrder, Vehicle } from '@/lib/api'; // 匯入 WorkOrder 和 Vehicle 型別
+import { apiClient, WorkOrder } from '@/lib/api'; // 只匯入 WorkOrder 型別
 import Link from 'next/link';
 import { format } from 'date-fns'; // 用於格式化日期
 
+// *** 假設您在 lib/api.ts 中定義了 VehicleMinimal interface ***
+// 用於 WorkOrder.vehicle 的型別
+interface VehicleMinimal {
+    id: number;
+    plate_no: string;
+    // 可能還有 make, model 等，依據後端回傳調整
+}
+
 export default function WorkOrdersPage() {
-  // 1. 載入工單列表
+  // 1. 只載入工單列表 (假設後端已包含 vehicle)
   const { data: workOrders, isLoading: isLoadingWorkOrders } = useQuery<WorkOrder[]>({
     queryKey: ['workOrders'], // 使用 'workOrders' 作為 query key
     queryFn: async () => {
-      // 預設獲取所有工單，不指定 vehicleId
+      // 呼叫獲取所有工單的 API
       const response = await apiClient.getWorkOrders();
       return response.data;
     },
   });
 
-  // 2. 載入車輛列表 (用於顯示車牌)
-  const { data: vehicles, isLoading: isLoadingVehicles } = useQuery<Vehicle[]>({
-    queryKey: ['vehicles'],
-    queryFn: async () => {
-      const response = await apiClient.getVehicles();
-      return response.data;
-    },
-  });
+  // *** 已移除載入 vehicles 的 useQuery ***
 
-  // 輔助函式：根據 vehicle_id 查找車牌
-  const getVehiclePlateNo = (vehicleId: number) => {
-    if (!vehicles) return `ID: ${vehicleId}`;
-    const vehicle = vehicles.find(v => v.id === vehicleId);
-    return vehicle ? vehicle.plate_no : `ID: ${vehicleId}`;
+  // 輔助函式：直接從 workOrder 物件讀取車輛資訊
+  const getVehicleDisplay = (workOrder: WorkOrder) => {
+    if (workOrder.vehicle) {
+      // 直接使用工單物件中關聯的車輛車牌
+      return workOrder.vehicle.plate_no || `ID: ${workOrder.vehicle_id}`;
+    }
+    return `ID: ${workOrder.vehicle_id}`; // Fallback
   };
 
   // 輔助函式：狀態徽章顏色
@@ -44,22 +47,22 @@ export default function WorkOrdersPage() {
       case 'pending_approval':
         return 'bg-yellow-100 text-yellow-800';
       case 'draft':
-      case 'billed': // 待對帳也用灰色
+      case 'billed':
       default:
         return 'bg-gray-100 text-gray-800';
     }
   };
 
-  // 組合載入狀態
-  const isLoading = isLoadingWorkOrders || isLoadingVehicles;
+  // 簡化載入狀態
+  const isLoading = isLoadingWorkOrders;
 
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">工單管理</h1>
-        {/* 新增工單按鈕 (連結暫設為 #) */}
+        {/* 新增工單按鈕 */}
         <Link
-          href="/work-orders/new" // 未來的新增頁面路徑
+          href="/work-orders/new"
           className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700"
         >
           新增工單
@@ -88,9 +91,9 @@ export default function WorkOrdersPage() {
                   <tr key={wo.id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">{wo.id}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      {/* 顯示車牌，並連結到車輛詳情頁 */}
+                      {/* 直接顯示車牌，並連結到車輛詳情頁 */}
                       <Link href={`/vehicles/${wo.vehicle_id}`} className="text-primary-600 hover:text-primary-900">
-                        {getVehiclePlateNo(wo.vehicle_id)}
+                        {getVehicleDisplay(wo)}
                       </Link>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">{wo.type}</td>
@@ -106,9 +109,9 @@ export default function WorkOrdersPage() {
                       {wo.completed_on ? format(new Date(wo.completed_on), 'yyyy-MM-dd') : '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      {/* 管理連結 (暫設為 #) */}
+                      {/* 管理連結 */}
                       <Link
-                        href={`/work-orders/${wo.id}/edit`} // 未來的編輯頁面路徑
+                        href={`/work-orders/${wo.id}/edit`}
                         className="text-primary-600 hover:text-primary-900"
                       >
                         管理
@@ -119,7 +122,7 @@ export default function WorkOrdersPage() {
               </tbody>
             </table>
             {/* 如果沒有工單資料 */}
-            {!workOrders || workOrders.length === 0 && (
+            {(!workOrders || workOrders.length === 0) && (
               <div className="p-6 text-center text-gray-500">
                 目前尚無工單資料
               </div>

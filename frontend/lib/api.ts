@@ -85,6 +85,13 @@ export interface Employee {
   created_at: string;
 }
 
+export interface VehicleMinimal { // 可以放在 Vehicle interface 前面或後面
+  id: number;
+  plate_no: string;
+  make?: string | null; // 可以選擇性加入 make/model
+  model?: string | null;
+}
+
 export interface Vehicle {
   id: number;
   plate_no: string;
@@ -209,6 +216,7 @@ export interface WorkOrder {
   created_at: string;
   updated_at?: string | null;
   vendor?: Vendor | null;
+  vehicle?: VehicleMinimal | null;
 }
 
 export interface TripCreatePayload { // 定義 TripCreate 的型別
