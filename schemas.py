@@ -287,16 +287,20 @@ class Inspection(InspectionBase):
     model_config = ConfigDict(from_attributes=True)
 
 class VehicleBase(BaseModel):
-    plate_no: str
-    vin: str | None = None
-    make: str
-    model: str
-    year: int
-    powertrain: str | None = None
-    displacement_cc: int
-    seats: int = 4
-    vehicle_type: VehicleTypeEnum
-    acquired_on: date | None = None
+    plate_no: str # <-- 保持必填
+
+    # --- 以下欄位加上 Optional ---
+    vin: Optional[str] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
+    year: Optional[int] = None
+    powertrain: Optional[str] = None
+    displacement_cc: Optional[int] = None
+    seats: Optional[int] = None
+    vehicle_type: Optional[VehicleTypeEnum] = None
+    # -----------------------------
+
+    acquired_on: Optional[date] = None
     status: VehicleStatusEnum = VehicleStatusEnum.active
     helmet_required: bool = False
 

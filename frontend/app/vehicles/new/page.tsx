@@ -6,34 +6,68 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation'; // 從 next/navigation 匯入
+import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api';
 
-// 1. 定義 Zod Schema (對應後端的 VehicleCreate)
+// 1. 定義 Zod Schema (再次修改，加入 preprocess)
 const vehicleSchema = z.object({
   plate_no: z.string().min(1, '車牌號碼為必填'),
-  make: z.string().min(1, '品牌為必填'),
-  model: z.string().min(1, '型號為必填'),
-  year: z.coerce.number().int().min(1900, '年份不正確').max(new Date().getFullYear() + 1, '年份不正確'), // coerce 將字串轉數字
-  displacement_cc: z.coerce.number().int().positive('排氣量必須是正整數'),
-  vehicle_type: z.enum(['car', 'motorcycle', 'van', 'truck', 'ev_scooter', 'other'], {
-    errorMap: () => ({ message: '請選擇有效的車輛類型' })
-  }),
-  // 其他選填欄位可以加入 .optional()
+
+  make: z.string().optional(),
+  model: z.string().optional(),
+
+  // --- 修改數字欄位 ---
+  year: z.preprocess(
+    (val) => (val === "" ? undefined : val), // 如果是空字串，轉為 undefined
+    z.coerce.number({invalid_type_error: '年份必須是數字'})
+      .int()
+      .min(1900, '年份不正確')
+      .max(new Date().getFullYear() + 1, '年份不正確')
+      .optional()
+      .nullable()
+  ),
+  displacement_cc: z.preprocess(
+    (val) => (val === "" ? undefined : val), // 如果是空字串，轉為 undefined
+    z.coerce.number({invalid_type_error: '排氣量必須是數字'})
+      .int()
+      .positive('排氣量必須是正整數')
+      .optional()
+      .nullable()
+  ),
+  // --------------------
+
+  // --- 修改枚舉欄位 ---
+  vehicle_type: z.preprocess(
+      (val) => (val === "" ? undefined : val), // 如果是空字串，轉為 undefined
+      z.enum(['car', 'motorcycle', 'van', 'truck', 'ev_scooter', 'other'], {
+          errorMap: () => ({ message: '請選擇有效的車輛類型' })
+      }).optional().nullable()
+  ),
+  // --------------------
+
   vin: z.string().optional(),
   powertrain: z.string().optional(),
-  seats: z.coerce.number().int().optional(),
-  acquired_on: z.string().optional().refine(val => !val || !isNaN(Date.parse(val)), { // 檢查是否為有效日期字串
+
+  // --- 修改 seats (也是數字) ---
+  seats: z.preprocess(
+      (val) => (val === "" ? undefined : val), // 如果是空字串，轉為 undefined
+      z.coerce.number({invalid_type_error: '座位數必須是數字'})
+        .int()
+        .optional()
+        .nullable()
+  ),
+  // -------------------------
+
+  acquired_on: z.string().optional().refine(val => !val || !isNaN(Date.parse(val)), {
       message: "取得日期格式不正確 (YYYY-MM-DD)"
-  }),
+  }).nullable(),
 });
 
-// 從 Zod Schema 推斷 TypeScript 型別
 type VehicleFormData = z.infer<typeof vehicleSchema>;
 
 export default function NewVehiclePage() {
   const router = useRouter();
-  const queryClient = useQueryClient(); // 用於快取失效
+  const queryClient = useQueryClient();
 
   // 2. 設定 react-hook-form
   const {
@@ -47,20 +81,17 @@ export default function NewVehiclePage() {
   // 3. 設定 react-query mutation (處理 API 呼叫)
   const mutation = useMutation({
     mutationFn: (data: VehicleFormData) => {
-        // 將 acquired_on 轉換為 Date 物件或 null
         const payload = {
             ...data,
             acquired_on: data.acquired_on ? data.acquired_on : null,
         };
-        return apiClient.createVehicle(payload);
+        return apiClient.createVehicle(payload); // 呼叫 API
     },
     onSuccess: () => {
-      // 成功後...
-      queryClient.invalidateQueries({ queryKey: ['vehicles'] }); // 讓車輛列表快取失效
+      queryClient.invalidateQueries({ queryKey: ['vehicles'] }); // 讓列表快取失效
       router.push('/vehicles'); // 導回列表頁
     },
     onError: (error) => {
-      // 顯示錯誤訊息 (簡易版)
       console.error("新增車輛失敗:", error);
       alert(`新增失敗: ${error.message}`);
     },
@@ -68,11 +99,10 @@ export default function NewVehiclePage() {
 
   // 4. 表單提交處理函式
   const onSubmit = (data: VehicleFormData) => {
-    console.log(data); // 可以在開發者工具中看到表單資料
-    mutation.mutate(data); // 觸發 mutation (呼叫 API)
+    mutation.mutate(data);
   };
 
-  // 車輛類型選項 (來自後端 models.py VehicleTypeEnum)
+  // 車輛類型選項
   const vehicleTypeOptions = [
     { value: 'car', label: '汽車' },
     { value: 'motorcycle', label: '機車' },
@@ -94,7 +124,7 @@ export default function NewVehiclePage() {
       {/* 5. 建立表單 */}
       <div className="bg-white rounded-lg shadow p-8">
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-          {/* 表單欄位範例 (車牌) */}
+          {/* 車牌 */}
           <div>
             <label htmlFor="plate_no" className="block text-sm font-medium text-gray-700">
               車牌號碼 <span className="text-red-600">*</span>
@@ -110,11 +140,11 @@ export default function NewVehiclePage() {
             )}
           </div>
 
-          {/* 品牌 & 型號 (放在同一行) */}
+          {/* 品牌 & 型號 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
                 <label htmlFor="make" className="block text-sm font-medium text-gray-700">
-                品牌 <span className="text-red-600">*</span>
+                品牌
                 </label>
                 <input
                 type="text"
@@ -128,7 +158,7 @@ export default function NewVehiclePage() {
             </div>
             <div>
                 <label htmlFor="model" className="block text-sm font-medium text-gray-700">
-                型號 <span className="text-red-600">*</span>
+                型號
                 </label>
                 <input
                 type="text"
@@ -146,7 +176,7 @@ export default function NewVehiclePage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
                 <label htmlFor="year" className="block text-sm font-medium text-gray-700">
-                年份 <span className="text-red-600">*</span>
+                年份
                 </label>
                 <input
                 type="number"
@@ -160,7 +190,7 @@ export default function NewVehiclePage() {
             </div>
              <div>
                 <label htmlFor="displacement_cc" className="block text-sm font-medium text-gray-700">
-                排氣量 (cc) <span className="text-red-600">*</span>
+                排氣量 (cc)
                 </label>
                 <input
                 type="number"
@@ -177,7 +207,7 @@ export default function NewVehiclePage() {
           {/* 車輛類型 */}
           <div>
             <label htmlFor="vehicle_type" className="block text-sm font-medium text-gray-700">
-              車輛類型 <span className="text-red-600">*</span>
+              車輛類型
             </label>
             <select
               id="vehicle_type"
@@ -211,7 +241,7 @@ export default function NewVehiclePage() {
               取得日期
             </label>
             <input
-              type="date" // 使用 date input
+              type="date"
               id="acquired_on"
               {...register('acquired_on')}
               className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm ${errors.acquired_on ? 'border-red-500' : ''}`}
@@ -224,7 +254,7 @@ export default function NewVehiclePage() {
           <div className="flex justify-end">
             <button
               type="submit"
-              disabled={mutation.isPending} // 正在提交時禁用按鈕
+              disabled={mutation.isPending}
               className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50"
             >
               {mutation.isPending ? '儲存中...' : '儲存'}
