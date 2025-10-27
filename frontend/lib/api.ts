@@ -259,7 +259,8 @@ export const apiClient = {
       : api.get<WorkOrder[]>('/api/v1/work-orders/'),
   createWorkOrder: (data: any) => api.post<WorkOrder>('/api/v1/work-orders/', data),
   updateWorkOrder: (id: number, data: any) => api.put<WorkOrder>(`/api/v1/work-orders/${id}`, data),
-    deleteWorkOrder: (id: number) => api.delete(`/api/v1/work-orders/${id}`),
+  deleteWorkOrder: (id: number) => api.delete(`/api/v1/work-orders/${id}`),
+  
   // Insurances
   getInsurances: (vehicleId: number) => api.get<Insurance[]>(`/api/v1/vehicles/${vehicleId}/insurances/`),
   createInsurance: (data: any) => api.post<Insurance>('/api/v1/insurances/', data),

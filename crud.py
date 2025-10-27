@@ -306,6 +306,92 @@ def get_work_orders_for_vehicle(db: Session, vehicle_id: int):
         joinedload(models.WorkOrder.vendor)
     ).filter(models.WorkOrder.vehicle_id == vehicle_id).all()
 
+def update_work_order(
+    db: Session,
+    work_order_id: int,
+    work_order_update: schemas.WorkOrderUpdate,
+    actor_id: int
+) -> models.WorkOrder | None:
+    """ (U) 更新工單資料 """
+    db_work_order = get_work_order(db, work_order_id) # 複用，會載入 vendor
+    if not db_work_order:
+        return None # 找不到工單
+
+    # 記錄舊值
+    old_work_order_data = deepcopy(db_work_order)
+
+    # 將 Pydantic schema 中的資料更新到 SQLAlchemy model instance
+    # exclude_unset=True: 只拿有傳入的欄位進行更新
+    update_data = work_order_update.model_dump(exclude_unset=True)
+
+    # (加入業務邏輯檢查，例如 completed_on 不能早於 scheduled_on 等 - 此處省略)
+
+    for key, value in update_data.items():
+        # 需要檢查 vendor_id 是否有效 (如果提供了的話)
+        if key == 'vendor_id' and value is not None:
+             db_vendor = get_vendor(db, value)
+             if not db_vendor:
+                 raise ValueError(f"ID 為 {value} 的供應商不存在")
+        # (未來可加入 invoice_doc_id 的檢查)
+
+        setattr(db_work_order, key, value)
+
+    db.add(db_work_order) # 將變更加入 session
+
+    # 記錄 Audit Log
+    create_audit_log(
+        db=db,
+        actor_id=actor_id,
+        action="UPDATE",
+        entity="WorkOrder",
+        entity_id=work_order_id,
+        old_value=old_work_order_data,
+        new_value=db_work_order
+    )
+
+    try:
+        db.commit()
+        db.refresh(db_work_order)
+        return db_work_order
+    except Exception as e:
+        db.rollback()
+        print(f"更新工單 {work_order_id} 失敗: {e}")
+        raise e
+
+def delete_work_order(
+    db: Session,
+    work_order_id: int,
+    actor_id: int
+) -> models.WorkOrder | None:
+    """ (D) 刪除工單 """
+    db_work_order = get_work_order(db, work_order_id) # 複用 get_work_order 載入關聯
+    if not db_work_order:
+        return None # 找不到工單
+
+    # 記錄被刪除的值
+    old_work_order_data = deepcopy(db_work_order)
+
+    # 在 commit 前記錄 Audit Log
+    create_audit_log(
+        db=db,
+        actor_id=actor_id,
+        action="DELETE",
+        entity="WorkOrder",
+        entity_id=work_order_id,
+        old_value=old_work_order_data,
+        new_value=None # 刪除後沒有新值
+    )
+
+    try:
+        db.delete(db_work_order)
+        db.commit()
+        return old_work_order_data # 回傳被刪除前的資料
+    except Exception as e:
+        db.rollback()
+        # 這裡可以加入更詳細的錯誤記錄
+        print(f"刪除工單 {work_order_id} 失敗: {e}")
+        raise e # 重新拋出例外，讓 API 層處理
+
 # --- Insurance CRUD ---
 
 def create_insurance(db: Session, insurance: schemas.InsuranceCreate):

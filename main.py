@@ -507,6 +507,75 @@ def read_vehicle_work_orders_api(
         
     return crud.get_work_orders_for_vehicle(db=db, vehicle_id=vehicle_id)
 
+@app.put("/api/v1/work-orders/{work_order_id}",
+         response_model=schemas.WorkOrder,
+         summary="更新工單資料")
+def update_work_order_api(
+    work_order_id: int,
+    work_order_update: schemas.WorkOrderUpdate, # 使用 Update Schema
+    db: Session = Depends(get_db),
+    actor_id: int = Depends(get_current_actor_id)
+):
+    """
+    更新指定 ID 的工單資料。
+    僅會更新請求中提供的欄位。
+
+    會記錄 Audit Log。
+    """
+    try:
+        updated_work_order = crud.update_work_order(
+            db=db,
+            work_order_id=work_order_id,
+            work_order_update=work_order_update,
+            actor_id=actor_id
+        )
+        if updated_work_order is None:
+            raise HTTPException(status_code=404, detail="找不到該工單")
+
+        # crud.update_work_order 返回的是更新後的物件
+        # 我們需要重新查詢一次，以包含關聯的 vendor 和 vehicle
+        # (或者修改 update_work_order 讓它回傳前先 refresh 關聯)
+        # 為了確保資料最新，重新查詢比較保險
+        return crud.get_work_order(db, work_order_id=work_order_id)
+
+    except ValueError as e: # 捕捉 crud 中可能的 ValueError (例如 vendor_id 無效)
+         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # 捕捉可能的資料庫錯誤或其他例外
+        raise HTTPException(status_code=500, detail=f"更新失敗: {e}")
+
+@app.delete("/api/v1/work-orders/{work_order_id}",
+            response_model=schemas.WorkOrder, # 回傳被刪除的工單資料
+            summary="刪除工單")
+def delete_work_order_api(
+    work_order_id: int,
+    db: Session = Depends(get_db),
+    actor_id: int = Depends(get_current_actor_id)
+):
+    """
+    刪除指定 ID 的工單。
+
+    會記錄 Audit Log。
+    """
+    try:
+        deleted_work_order_data = crud.delete_work_order(
+            db=db,
+            work_order_id=work_order_id,
+            actor_id=actor_id
+        )
+        if deleted_work_order_data is None:
+            raise HTTPException(status_code=404, detail="找不到該工單")
+
+        # 因為物件已被刪除，無法重新查詢，直接用刪除前複製的資料回傳
+        # 確保回傳的資料符合 schemas.WorkOrder (可能需要手動處理關聯欄位)
+        # 為了簡化，我們先假設 Pydantic 可以處理 SQLAlchemy 刪除前的物件
+        # 注意：這裡的 vendor 可能不會被正確序列化，如果需要，要手動組裝
+        return schemas.WorkOrder.model_validate(deleted_work_order_data)
+
+    except Exception as e:
+        # 捕捉可能的資料庫錯誤或其他例外
+        raise HTTPException(status_code=400, detail=f"刪除失敗: {e}")
+
 # --- Insurances API ---
 
 @app.post("/api/v1/insurances/", 

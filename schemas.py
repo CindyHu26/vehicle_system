@@ -222,6 +222,22 @@ class WorkOrder(WorkOrderBase):
     
     model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True) # 允許 Decimal
 
+class WorkOrderUpdate(BaseModel):
+    """(U) 更新工單時用的 Schema"""
+    # 這裡列出允許前端更新的欄位
+    # 通常 vehicle_id 和 type 不允許變更
+    status: Optional[WorkOrderStatusEnum] = None
+    vendor_id: Optional[int] = None
+    scheduled_on: Optional[date] = None
+    completed_on: Optional[date] = None
+    cost_amount: Optional[Decimal] = None
+    invoice_doc_id: Optional[int] = None # 允許更新關聯的發票
+    notes: Optional[str] = None
+    odometer_at_service: Optional[int] = None
+
+    # Pydantic v2: Use model_config
+    model_config = ConfigDict(extra='forbid', arbitrary_types_allowed=True) # 不允許 schema 外的欄位, 允許 Decimal
+    
 # --- Insurance Schemas ---
 class InsuranceBase(BaseModel):
     vehicle_id: int

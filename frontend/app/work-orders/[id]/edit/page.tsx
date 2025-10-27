@@ -76,7 +76,6 @@ export default function EditWorkOrderPage() {
     queryFn: () => apiClient.getVendors().then(res => res.data),
   });
 
-
   // 3. 設定 react-hook-form
   const {
     register,
@@ -91,17 +90,16 @@ export default function EditWorkOrderPage() {
   // 4. 當資料載入後，設定表單預設值
   useEffect(() => {
     if (workOrder) {
-      // *** 不要使用 ...workOrder ***
-      // 明確地設定表單欄位的值
-      reset({
-        type: workOrder.type as any, // 假設 type 通常不變，或者您可以讓它可選
+        reset({
+        // *** 保持明確賦值 ***
+        type: workOrder.type as any, // 假設 type 通常不變
         status: workOrder.status as any,
-        vendor_id: workOrder.vendor_id ?? undefined, // null 轉 undefined
-        scheduled_on: workOrder.scheduled_on ? format(new Date(workOrder.scheduled_on), 'yyyy-MM-dd') : '', // 格式化日期
-        completed_on: workOrder.completed_on ? format(new Date(workOrder.completed_on), 'yyyy-MM-dd') : '', // 格式化日期
-        notes: workOrder.notes ?? '', // null 轉空字串
-        odometer_at_service: workOrder.odometer_at_service ?? undefined, // null 轉 undefined
-        cost_amount: workOrder.cost_amount ? Number(workOrder.cost_amount) : undefined, // string 轉 number
+        vendor_id: workOrder.vendor_id ?? undefined,
+        scheduled_on: workOrder.scheduled_on ? format(new Date(workOrder.scheduled_on), 'yyyy-MM-dd') : '',
+        completed_on: workOrder.completed_on ? format(new Date(workOrder.completed_on), 'yyyy-MM-dd') : '',
+        notes: workOrder.notes ?? '',
+        odometer_at_service: workOrder.odometer_at_service ?? undefined,
+        cost_amount: workOrder.cost_amount ? Number(workOrder.cost_amount) : undefined,
       });
     }
   }, [workOrder, reset]);
@@ -109,34 +107,69 @@ export default function EditWorkOrderPage() {
   // 5. 設定更新 Mutation
   const updateMutation = useMutation({
     mutationFn: (data: WorkOrderUpdateFormData) => {
-        // 準備送往後端的 payload
-        const payload = {
-            ...data,
-            scheduled_on: data.scheduled_on || null, // 空字串轉 null
-            completed_on: data.completed_on || null,
+        // *** 修改 Payload 準備 ***
+        // 只包含 WorkOrderUpdate schema 中定義的欄位
+        const payload: Partial<WorkOrderUpdateFormData> = { // 使用 Partial 確保只包含部分欄位
+            status: data.status,
             vendor_id: data.vendor_id ?? null,
-            odometer_at_service: data.odometer_at_service ?? null,
-            cost_amount: data.cost_amount ? String(data.cost_amount) : null, // 轉回字串
+            scheduled_on: data.scheduled_on || null,
+            completed_on: data.completed_on || null,
+            cost_amount: data.cost_amount ?? null, // *** 改為直接傳遞數字或 null ***
             notes: data.notes || null,
+            odometer_at_service: data.odometer_at_service ?? null,
+            // invoice_doc_id: data.invoice_doc_id ?? null, // 如果未來加入此欄位
         };
-        // *** 假設 apiClient 有 updateWorkOrder 方法 ***
-        return apiClient.updateWorkOrder(workOrderId, payload);
+
+        // 過濾掉值為 undefined 的鍵，雖然傳 null 通常也可以
+        const filteredPayload = Object.fromEntries(
+          Object.entries(payload).filter(([_, v]) => v !== undefined)
+        );
+
+        console.log("Sending update payload:", filteredPayload); // Debug: 查看送出的資料
+
+        // *** 確保 apiClient.updateWorkOrder 存在 ***
+        return apiClient.updateWorkOrder(workOrderId, filteredPayload);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workOrders'] }); // 更新列表快取
-      queryClient.invalidateQueries({ queryKey: ['workOrder', workOrderId] }); // 更新此工單快取
-      router.push('/work-orders'); // 或導回詳情頁 `/work-orders/${workOrderId}`
+      queryClient.invalidateQueries({ queryKey: ['workOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['workOrder', workOrderId] });
+      router.push('/work-orders');
       alert('工單更新成功！');
     },
+    // *** 修改 onError ***
     onError: (error: any) => {
-      console.error("更新工單失敗:", error);
-      const errorMsg = error.response?.data?.detail || error.message;
-      alert(`更新失敗: ${errorMsg}`);
+      console.error("更新工單失敗:", error.response?.data || error); // Log a more detailed error
+      let errorMsg = "更新失敗，請檢查輸入或稍後再試。"; // Default message
+      if (error.response?.data?.detail) {
+        // Try to parse FastAPI validation errors (usually in error.response.data.detail)
+        try {
+          if (Array.isArray(error.response.data.detail)) {
+            // Format validation errors nicely
+            errorMsg = error.response.data.detail
+              .map((err: any) => `${err.loc.slice(1).join('.')} (${err.input}): ${err.msg}`) // Show field name, input value, and message
+              .join('\n');
+          } else if (typeof error.response.data.detail === 'string') {
+            // Handle simple string errors from backend (like ValueError)
+            errorMsg = error.response.data.detail;
+          } else {
+             // Handle cases where detail might be an object but not an array of errors
+             errorMsg = JSON.stringify(error.response.data.detail);
+          }
+        } catch (parseError) {
+           console.error("Error parsing error detail:", parseError);
+           // Fallback if parsing fails
+           errorMsg = error.response?.data?.detail || "發生未知錯誤。";
+        }
+
+      } else if (error.message) {
+        errorMsg = error.message; // Use generic message if no detail found
+      }
+      alert(`更新失敗:\n${errorMsg}`); // Display the more detailed error message
     },
   });
 
-   // 6. (可選) 設定刪除 Mutation
-   const deleteMutation = useMutation({
+  // 6. (可選) 設定刪除 Mutation
+  const deleteMutation = useMutation({
     mutationFn: () => {
         // *** 假設 apiClient 有 deleteWorkOrder 方法 ***
         return apiClient.deleteWorkOrder(workOrderId);
@@ -166,16 +199,23 @@ export default function EditWorkOrderPage() {
   };
 
   // 選項 (與 new page 相同)
-   const workOrderTypeOptions = [
+  const workOrderTypeOptions = [
     { value: 'maintenance', label: '定期保養' },
     { value: 'repair', label: '故障維修' },
-    // ... 其他選項 ...
+    { value: 'recall', label: '召回' },
+    { value: 'cleaning', label: '清潔' },
+    { value: 'emission_check', label: '排氣定檢 (機車)' },
+    { value: 'inspection', label: '定期檢驗 (四輪)' },
+    { value: 'purification', label: '淨車' },
     { value: 'other', label: '其他' },
   ];
+
   const workOrderStatusOptions = [
     { value: 'draft', label: '草稿' },
     { value: 'pending_approval', label: '待核准' },
-     // ... 其他選項 ...
+    { value: 'in_progress', label: '進行中' },
+    { value: 'completed', label: '完成' },
+    { value: 'billed', label: '待對帳' },
     { value: 'closed', label: '結案' },
   ];
 
