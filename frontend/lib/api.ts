@@ -138,6 +138,15 @@ export interface VehicleAsset {
   notes?: string;
 }
 
+export interface Vendor { // 加入 Vendor interface
+  id: number;
+  name: string;
+  category: string;
+  contact?: string | null;
+  notes?: string | null;
+  created_at: string;
+}
+
 export interface Insurance {
   id: number;
   vehicle_id: number;
@@ -258,6 +267,8 @@ export const apiClient = {
   // Trips
   createTrip: (reservationId: number, data: any) => 
     api.post<Trip>(`/api/v1/reservations/${reservationId}/trip/`, data),
+  // Vendors
+  getVendors: () => api.get<Vendor[]>('/api/v1/vendors/'),
 };
 
 export default api;
