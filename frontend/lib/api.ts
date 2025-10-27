@@ -45,9 +45,12 @@ export interface Trip {
   reservation_id: number;
   vehicle_id: number;
   driver_id: number;
-  odometer_start?: number;
-  odometer_end?: number;
-  notes?: string;
+  odometer_start?: number | null; // 允許 null
+  odometer_end?: number | null;
+  fuel_liters?: string | null; // 後端 Decimal 回傳 string，允許 null
+  charge_kwh?: string | null; // 新增
+  evidence_photo_url?: string | null; // 新增
+  notes?: string | null;
   returned_at: string;
 }
 
@@ -171,14 +174,15 @@ export interface Violation {
 export interface Reservation {
   id: number;
   requester_id: number;
-  vehicle_id?: number;
+  vehicle_id?: number | null; // 允許 null
   purpose: string;
   vehicle_type_pref?: string;
   start_ts: string;
   end_ts: string;
   status: string;
-  destination?: string;
+  destination?: string | null; // 允許 null
   created_at: string;
+  trip?: Trip | null; // <--- 新增 trip 欄位，允許 null
 }
 
 export interface WorkOrder {
@@ -191,6 +195,17 @@ export interface WorkOrder {
   completed_on?: string;
   cost_amount?: string;
   notes?: string;
+}
+
+export interface TripCreatePayload { // 定義 TripCreate 的型別
+    vehicle_id: number;
+    driver_id: number;
+    odometer_start?: number | null;
+    odometer_end?: number | null;
+    fuel_liters?: number | string | null; // 允許前端送數字或字串 (zod 會處理)
+    charge_kwh?: number | string | null;
+    evidence_photo_url?: string | null;
+    notes?: string | null;
 }
 
 // API functions
