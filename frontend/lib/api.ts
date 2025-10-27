@@ -199,11 +199,16 @@ export interface WorkOrder {
   vehicle_id: number;
   type: string;
   status: string;
-  vendor_id?: number;
-  scheduled_on?: string;
-  completed_on?: string;
-  cost_amount?: string;
-  notes?: string;
+  vendor_id?: number | null; // 允許 null
+  scheduled_on?: string | null; // 允許 null
+  completed_on?: string | null; // 允許 null
+  cost_amount?: string | null; // 允許 null
+  invoice_doc_id?: number | null; // 根據 schema.py 加入
+  notes?: string | null; // 允許 null
+  odometer_at_service?: number | null;
+  created_at: string;
+  updated_at?: string | null;
+  vendor?: Vendor | null;
 }
 
 export interface TripCreatePayload { // 定義 TripCreate 的型別
@@ -239,12 +244,14 @@ export const apiClient = {
   updateReservation: (id: number, data: any) => api.patch<Reservation>(`/api/v1/reservations/${id}/`, data),
 
   // Work Orders
+  getWorkOrder: (id: number) => api.get<WorkOrder>(`/api/v1/work-orders/${id}`),
   getWorkOrders: (vehicleId?: number) => 
     vehicleId 
       ? api.get<WorkOrder[]>(`/api/v1/vehicles/${vehicleId}/work-orders/`)
       : api.get<WorkOrder[]>('/api/v1/work-orders/'),
   createWorkOrder: (data: any) => api.post<WorkOrder>('/api/v1/work-orders/', data),
-
+  updateWorkOrder: (id: number, data: any) => api.put<WorkOrder>(`/api/v1/work-orders/${id}`, data),
+    deleteWorkOrder: (id: number) => api.delete(`/api/v1/work-orders/${id}`),
   // Insurances
   getInsurances: (vehicleId: number) => api.get<Insurance[]>(`/api/v1/vehicles/${vehicleId}/insurances/`),
   createInsurance: (data: any) => api.post<Insurance>('/api/v1/insurances/', data),
