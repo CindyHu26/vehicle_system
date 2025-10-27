@@ -1,14 +1,15 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { apiClient } from '@/lib/api';
+import { apiClient, VehicleBasic } from '@/lib/api';
 import Link from 'next/link';
 
 export default function Home() {
-  const { data: vehicles, isLoading } = useQuery({
-    queryKey: ['vehicles'],
+  // *** 修改這裡：使用 getVehiclesBasic 和 VehicleBasic[] ***
+  const { data: vehicles, isLoading } = useQuery<VehicleBasic[]>({
+    queryKey: ['vehiclesBasic'], // <-- 使用不同的 query key 以避免衝突
     queryFn: async () => {
-      const response = await apiClient.getVehicles();
+      const response = await apiClient.getVehiclesBasic(); // <-- 呼叫新的 API 方法
       return response.data;
     },
   });
@@ -43,10 +44,10 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Vehicles List */}
+     {/* Vehicles List */}
       <div className="bg-white rounded-lg shadow">
         <div className="p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold">車輛列表</h2>
+          <h2 className="text-xl font-semibold">車輛列表 (最近 10 筆)</h2> {/* 可以標示筆數限制 */}
         </div>
         {isLoading ? (
           <div className="p-6 text-center">載入中...</div>
@@ -73,16 +74,18 @@ export default function Home() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
+                {/* *** 使用 vehicles (型別是 VehicleBasic[]) *** */}
                 {vehicles?.map((vehicle) => (
                   <tr key={vehicle.id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {vehicle.plate_no}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {vehicle.make} {vehicle.model}
+                      {/* 確保 make/model 存在或給予預設值 */}
+                      {vehicle.make || '-'} {vehicle.model || '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {vehicle.vehicle_type}
+                      {vehicle.vehicle_type || '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span
@@ -99,7 +102,7 @@ export default function Home() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <Link
-                        href={`/vehicles/${vehicle.id}`}
+                        href={`/vehicles/${vehicle.id}`} // 連結到詳情頁不變
                         className="text-primary-600 hover:text-primary-900"
                       >
                         查看詳情
@@ -107,6 +110,12 @@ export default function Home() {
                     </td>
                   </tr>
                 ))}
+                {/* 如果沒有車輛資料 */}
+                {(!vehicles || vehicles.length === 0) && (
+                    <tr>
+                        <td colSpan={5} className="px-6 py-4 text-center text-gray-500">尚無車輛資料</td>
+                    </tr>
+                )}
               </tbody>
             </table>
           </div>

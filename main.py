@@ -110,6 +110,21 @@ def read_employee_by_emp_no_api(emp_no: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="找不到該員工編號")
     return crud.get_employee(db, employee_id=db_employee.id)
 
+@app.get("/api/v1/vehicles/basic/",
+         response_model=List[schemas.VehicleBasic], # 使用新的 Basic Schema
+         summary="查詢車輛基本資訊列表 (輕量級)")
+def read_vehicles_basic_api(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """
+    讀取車輛的基本資訊列表 (ID, 車牌, 品牌型號, 類型, 狀態)，支援分頁。
+    此端點不包含詳細的關聯資料，適用於儀表板列表。
+    """
+    vehicles = crud.get_vehicles_basic(db, skip=skip, limit=limit)
+    return vehicles
+
 @app.get("/api/v1/vehicles/{vehicle_id}", response_model=schemas.Vehicle, summary="查詢單一車輛")
 def read_vehicle_api(vehicle_id: int, db: Session = Depends(get_db)):
     # crud.get_vehicle 現在會自動載入所有關聯
@@ -117,8 +132,6 @@ def read_vehicle_api(vehicle_id: int, db: Session = Depends(get_db)):
     if db_vehicle is None:
         raise HTTPException(status_code=404, detail="找不到該車輛")
     return db_vehicle
-
-# --- Vehicles API (!!! 新增 Update 和 Delete !!!) ---
 
 @app.post("/api/v1/vehicles/", response_model=schemas.Vehicle, summary="建立新車輛")
 def create_vehicle_api(vehicle: schemas.VehicleCreate, db: Session = Depends(get_db)):

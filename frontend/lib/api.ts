@@ -92,6 +92,15 @@ export interface VehicleMinimal { // 可以放在 Vehicle interface 前面或後
   model?: string | null;
 }
 
+export interface VehicleBasic {
+  id: number;
+  plate_no: string;
+  make?: string | null; // 與後端 schema.py 保持一致
+  model?: string | null;
+  vehicle_type?: 'car' | 'motorcycle' | 'van' | 'truck' | 'ev_scooter' | 'other' | null; // 允許 null
+  status: 'active' | 'maintenance' | 'idle' | 'retired';
+}
+
 export interface Vehicle {
   id: number;
   plate_no: string;
@@ -230,6 +239,23 @@ export interface TripCreatePayload { // 定義 TripCreate 的型別
     notes?: string | null;
 }
 
+export interface ComplianceReportItem {
+  vehicle_id: number;
+  plate_no: string;
+  vehicle_type: string; // 或使用 VehicleTypeEnum 如果需要更精確
+  status: string; // 或使用 VehicleStatusEnum
+  issues: string[]; // 錯誤/警告訊息陣列
+}
+
+export interface ComplianceReportResponse {
+  report_date: string;
+  days_ahead: number;
+  total_vehicles: number;
+  compliant_vehicles: number;
+  compliance_rate: number;
+  items: ComplianceReportItem[]; // 使用上面定義的 Item interface
+}
+
 // API functions
 export const apiClient = {
   // Employees
@@ -244,6 +270,7 @@ export const apiClient = {
   createVehicle: (data: any) => api.post<Vehicle>('/api/v1/vehicles/', data),
   updateVehicle: (id: number, data: any) => api.put<Vehicle>(`/api/v1/vehicles/${id}`, data),
   deleteVehicle: (id: number) => api.delete<Vehicle>(`/api/v1/vehicles/${id}`),
+  getVehiclesBasic: () => api.get<VehicleBasic[]>('/api/v1/vehicles/basic/'),
 
   // Reservations
   getReservations: () => api.get<Reservation[]>('/api/v1/reservations/'),
@@ -278,7 +305,7 @@ export const apiClient = {
       params: { start_date: startDate, end_date: endDate },
     }),
   getComplianceReport: (daysAhead: number = 30) =>
-    api.get('/api/v1/analytics/compliance-report', { params: { days_ahead: daysAhead } }),
+    api.get<ComplianceReportResponse>('/api/v1/analytics/compliance-report', { params: { days_ahead: daysAhead } }),
 
   // Trips
   createTrip: (reservationId: number, data: any) => 

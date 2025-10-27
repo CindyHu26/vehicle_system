@@ -37,6 +37,16 @@ def create_employee(db: Session, employee: schemas.EmployeeCreate):
     db.refresh(db_employee)
     return db_employee
 
+def get_vehicles_basic(db: Session, skip: int = 0, limit: int = 100):
+    """
+    (R) 查詢多筆車輛的基本資訊 (分頁)，不載入關聯資料。
+    用於儀表板等列表顯示。
+    """
+    # 僅查詢 Vehicle 表，不使用 .options() 載入關聯
+    return db.query(models.Vehicle)\
+             .order_by(models.Vehicle.plate_no) \
+             .offset(skip).limit(limit).all()
+
 def get_vehicle(db: Session, vehicle_id: int):
     """ 
     (R) 依據 ID 查詢單一車輛

@@ -302,6 +302,17 @@ class Inspection(InspectionBase):
     
     model_config = ConfigDict(from_attributes=True)
 
+class VehicleBasic(BaseModel):
+    """(R) 用於列表顯示的基本車輛資訊 Schema"""
+    id: int
+    plate_no: str
+    make: Optional[str] = None
+    model: Optional[str] = None
+    vehicle_type: Optional[VehicleTypeEnum] = None
+    status: VehicleStatusEnum
+
+    model_config = ConfigDict(from_attributes=True) # 允許從 ORM 物件轉換
+
 class VehicleBase(BaseModel):
     plate_no: str # <-- 保持必填
 
