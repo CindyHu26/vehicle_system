@@ -7,7 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useParams } from 'next/navigation';
-import { apiClient, Reservation, Vehicle, Employee } from '@/lib/api';
+import { apiClient, Reservation, Vehicle, Employee, Trip } from '@/lib/api';
 import { useEffect } from 'react';
 import { format } from 'date-fns';
 
@@ -21,6 +21,22 @@ const reservationUpdateSchema = z.object({
 });
 
 type ReservationUpdateFormData = z.infer<typeof reservationUpdateSchema>;
+
+const tripSchema = z.object({
+  odometer_start: z.coerce.number().int().positive("必須是大於 0 的數字").optional().nullable(),
+  odometer_end: z.coerce.number().int().positive("必須是大於 0 的數字").optional().nullable(),
+  fuel_liters: z.coerce.number().positive("必須是大於 0 的數字").optional().nullable(),
+  notes: z.string().optional(),
+}).refine(data => { // 結束里程必須 >= 開始里程
+    if (data.odometer_start && data.odometer_end) {
+        return data.odometer_end >= data.odometer_start;
+    }
+    return true;
+}, {
+    message: "結束里程數必須大於或等於開始里程數",
+    path: ["odometer_end"],
+});
+type TripFormData = z.infer<typeof tripSchema>;
 
 export default function EditReservationPage() {
   const router = useRouter();
@@ -48,25 +64,35 @@ export default function EditReservationPage() {
     select: (data) => data.filter(v => v.status === 'active'),
   });
 
-  // 設定 react-hook-form
+  // --- 表單設定 ---
+  // (管理預約表單)
   const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    reset,
+    register: registerUpdate,
+    handleSubmit: handleSubmitUpdate,
+    formState: { errors: errorsUpdate },
+    reset: resetUpdate,
   } = useForm<ReservationUpdateFormData>({
     resolver: zodResolver(reservationUpdateSchema),
+  });
+
+  // (行程回報表單)
+  const {
+    register: registerTrip,
+    handleSubmit: handleSubmitTrip,
+    formState: { errors: errorsTrip },
+  } = useForm<TripFormData>({
+    resolver: zodResolver(tripSchema),
   });
 
   // 當資料載入後，設定表單預設值
   useEffect(() => {
     if (reservation) {
-      reset({
+      resetUpdate({
         status: reservation.status as any,
         vehicle_id: reservation.vehicle_id ?? undefined,
       });
     }
-  }, [reservation, reset]);
+  }, [reservation, resetUpdate]);
 
   // 設定 mutation (呼叫更新 API)
   const mutation = useMutation({

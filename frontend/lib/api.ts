@@ -239,6 +239,10 @@ export const apiClient = {
     }),
   getComplianceReport: (daysAhead: number = 30) =>
     api.get('/api/v1/analytics/compliance-report', { params: { days_ahead: daysAhead } }),
+
+  // Trips
+  createTrip: (reservationId: number, data: any) => 
+    api.post<Trip>(`/api/v1/reservations/${reservationId}/trip/`, data),
 };
 
 export default api;
