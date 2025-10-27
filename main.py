@@ -110,12 +110,6 @@ def read_employee_by_emp_no_api(emp_no: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="找不到該員工編號")
     return crud.get_employee(db, employee_id=db_employee.id)
 
-@app.get("/api/v1/vehicles/", response_model=List[schemas.Vehicle], summary="查詢車輛列表")
-def read_vehicles_api(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    # crud.get_vehicles 現在會自動載入所有關聯
-    vehicles = crud.get_vehicles(db, skip=skip, limit=limit)
-    return vehicles
-
 @app.get("/api/v1/vehicles/{vehicle_id}", response_model=schemas.Vehicle, summary="查詢單一車輛")
 def read_vehicle_api(vehicle_id: int, db: Session = Depends(get_db)):
     # crud.get_vehicle 現在會自動載入所有關聯

@@ -21,11 +21,15 @@ export default function RootLayout({
     <html lang="zh-TW">
       <body className={inter.className}>
         <ReactQueryProvider>
-          <div className="min-h-screen bg-gray-50">
+          {/* (!!! 修改外層 div，讓 Navbar 延伸，Sidebar 和 Main 在下方 flex) !!! */}
+          <div className="min-h-screen flex flex-col bg-gray-50">
             <Navbar />
-            <div className="flex">
+            <div className="flex flex-1"> {/* flex-1 讓內容區填滿剩餘高度 */}
               <Sidebar />
-              <main className="flex-1 p-6">{children}</main>
+              {/* (!!! 修改 main 元素，加入 md:ml-64 !!!) */}
+              <main className="flex-1 p-6 md:ml-64"> {/* 在 md 以上螢幕增加左邊距 */}
+                {children}
+              </main>
             </div>
           </div>
         </ReactQueryProvider>
