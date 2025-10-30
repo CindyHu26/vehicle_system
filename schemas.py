@@ -112,6 +112,15 @@ class Employee(EmployeeBase):
     trips_driven: List[Trip] = []
     model_config = ConfigDict(from_attributes=True)
 
+class EmployeeUpdate(BaseModel):
+    """(U) 更新員工時用的 Schema"""
+    # emp_no (員工編號) 通常不允許修改
+    name: Optional[str] = None
+    dept_name: Optional[str] = None
+    license_class: Optional[str] = None
+    status: Optional[EmployeeStatusEnum] = None
+
+    model_config = ConfigDict(extra='forbid') # 不允許 schema 外的欄位
 
 # --- VehicleDocument Schemas ---
 class VehicleDocumentBase(BaseModel):
@@ -314,9 +323,7 @@ class VehicleBasic(BaseModel):
     model_config = ConfigDict(from_attributes=True) # 允許從 ORM 物件轉換
 
 class VehicleBase(BaseModel):
-    plate_no: str # <-- 保持必填
-
-    # --- 以下欄位加上 Optional ---
+    plate_no: str
     vin: Optional[str] = None
     make: Optional[str] = None
     model: Optional[str] = None
@@ -325,8 +332,6 @@ class VehicleBase(BaseModel):
     displacement_cc: Optional[int] = None
     seats: Optional[int] = None
     vehicle_type: Optional[VehicleTypeEnum] = None
-    # -----------------------------
-
     acquired_on: Optional[date] = None
     status: VehicleStatusEnum = VehicleStatusEnum.active
     helmet_required: bool = False

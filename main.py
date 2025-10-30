@@ -99,6 +99,65 @@ def read_employee_by_emp_no_api(emp_no: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="找不到該員工編號")
     return crud.get_employee(db, employee_id=db_employee.id)
 
+@app.put("/api/v1/employees/{employee_id}",
+         response_model=schemas.Employee,
+         summary="更新員工資料")
+def update_employee_api(
+    employee_id: int,
+    employee_update: schemas.EmployeeUpdate, # 使用 Update Schema
+    db: Session = Depends(get_db),
+    actor_id: int = Depends(get_current_actor_id)
+):
+    """
+    更新指定 ID 的員工資料。
+    (員工編號 emp_no 不允許修改)
+    會記錄 Audit Log。
+    """
+    try:
+        updated_employee = crud.update_employee(
+            db=db,
+            employee_id=employee_id,
+            employee_update=employee_update,
+            actor_id=actor_id
+        )
+        if updated_employee is None:
+            raise HTTPException(status_code=404, detail="找不到該員工")
+        
+        # 重新查詢以獲取完整的關聯資料
+        return crud.get_employee(db, employee_id=employee_id)
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"更新失敗: {e}")
+
+@app.delete("/api/v1/employees/{employee_id}",
+            response_model=schemas.Employee, # 回傳被刪除的資料
+            summary="刪除員工")
+def delete_employee_api(
+    employee_id: int,
+    db: Session = Depends(get_db),
+    actor_id: int = Depends(get_current_actor_id)
+):
+    """
+    刪除指定 ID 的員工。
+    關聯的預約單/行程/違規紀錄中的駕駛 ID 將被設為 NULL。
+    會記錄 Audit Log。
+    """
+    try:
+        deleted_employee_data = crud.delete_employee(
+            db=db,
+            employee_id=employee_id,
+            actor_id=actor_id
+        )
+        if deleted_employee_data is None:
+            raise HTTPException(status_code=404, detail="找不到該員工")
+        
+        # 回傳被刪除前的物件資料
+        return schemas.Employee.model_validate(deleted_employee_data)
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"刪除失敗: {e}")
+
 # --- Vehicles API ---
 
 @app.get("/api/v1/vehicles/basic/",

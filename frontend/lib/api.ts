@@ -85,6 +85,13 @@ export interface Employee {
   created_at: string;
 }
 
+export interface EmployeeUpdatePayload {
+  name?: string | null;
+  dept_name?: string | null;
+  license_class?: string | null;
+  status?: 'active' | 'inactive';
+}
+
 export interface VehicleMinimal { // 可以放在 Vehicle interface 前面或後面
   id: number;
   plate_no: string;
@@ -261,7 +268,9 @@ export const apiClient = {
   getEmployees: () => api.get<Employee[]>('/api/v1/employees/'),
   getEmployee: (id: number) => api.get<Employee>(`/api/v1/employees/${id}`),
   createEmployee: (data: any) => api.post<Employee>('/api/v1/employees/', data),
-
+  updateEmployee: (id: number, data: EmployeeUpdatePayload) => api.put<Employee>(`/api/v1/employees/${id}`, data),
+  deleteEmployee: (id: number) => api.delete<Employee>(`/api/v1/employees/${id}`),
+  
   // Vehicles
   getVehicles: () => api.get<Vehicle[]>('/api/v1/vehicles/'),
   getVehicle: (id: number) => api.get<Vehicle>(`/api/v1/vehicles/${id}`),

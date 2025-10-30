@@ -37,6 +37,80 @@ def create_employee(db: Session, employee: schemas.EmployeeCreate):
     db.refresh(db_employee)
     return db_employee
 
+def update_employee(
+    db: Session,
+    employee_id: int,
+    employee_update: schemas.EmployeeUpdate,
+    actor_id: int
+) -> models.Employee | None:
+    """ (U) 更新員工資料 """
+    db_employee = get_employee(db, employee_id)
+    if not db_employee:
+        return None
+
+    old_employee_data = deepcopy(db_employee)
+
+    # 將 Pydantic schema 中的資料更新到 SQLAlchemy model instance
+    update_data = employee_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_employee, key, value)
+
+    db.add(db_employee) # 將變更加入 session
+
+    # 記錄 Audit Log
+    create_audit_log(
+        db=db,
+        actor_id=actor_id,
+        action="UPDATE",
+        entity="Employee",
+        entity_id=employee_id,
+        old_value=old_employee_data,
+        new_value=db_employee
+    )
+
+    try:
+        db.commit()
+        db.refresh(db_employee)
+        return db_employee
+    except Exception as e:
+        db.rollback()
+        raise e
+    
+def delete_employee(
+    db: Session,
+    employee_id: int,
+    actor_id: int
+) -> models.Employee | None:
+    """ (D) 刪除員工 """
+    db_employee = get_employee(db, employee_id)
+    if not db_employee:
+        return None
+
+    old_employee_data = deepcopy(db_employee)
+
+    # 記錄 Audit Log
+    create_audit_log(
+        db=db,
+        actor_id=actor_id,
+        action="DELETE",
+        entity="Employee",
+        entity_id=employee_id,
+        old_value=old_employee_data,
+        new_value=None
+    )
+    
+    # 注意：我們在 models.py 中設定了 ondelete="SET NULL"
+    # 所以刪除員工時，關聯的 Violation, Reservation, Trip 紀錄會被保留，
+    # 但 driver_id/requester_id 會被設為 NULL。
+    
+    try:
+        db.delete(db_employee)
+        db.commit()
+        return old_employee_data # 回傳被刪除前的資料
+    except Exception as e:
+        db.rollback()
+        raise e
+
 def get_vehicles_basic(db: Session, skip: int = 0, limit: int = 100):
     """
     (R) 查詢多筆車輛的基本資訊 (分頁)，不載入關聯資料。
