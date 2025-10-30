@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from database import Base
 
 # --- 列舉 (Enum) 定義 ---
+# ... (所有 Enum 保持不變) ...
 class VehicleTypeEnum(enum.Enum):
     car = "car"
     motorcycle = "motorcycle"
@@ -131,11 +132,13 @@ class Employee(Base):
     status = Column(Enum(EmployeeStatusEnum), default=EmployeeStatusEnum.active, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    violations = relationship("Violation", back_populates="driver")
-    # 讓 Python 可以透過 employee.reservations 存取該員工的所有申請
-    reservations_requested = relationship("Reservation", back_populates="requester", foreign_keys="[Reservation.requester_id]")
-    # 讓 Python 可以透過 employee.trips 存取該員工的所有行程
-    trips_driven = relationship("Trip", back_populates="driver")
+    
+    # --- (!!! MODIFICATION HERE: 加入 cascade 和 passive_deletes) ---
+    violations = relationship("Violation", back_populates="driver", cascade="all, delete-orphan", passive_deletes=True)
+    reservations_requested = relationship("Reservation", back_populates="requester", foreign_keys="[Reservation.requester_id]", cascade="all, delete-orphan", passive_deletes=True)
+    trips_driven = relationship("Trip", back_populates="driver", cascade="all, delete-orphan", passive_deletes=True)
+    # -----------------------------------------------------------------
+
     def __repr__(self):
         return f"<Employee(emp_no='{self.emp_no}', name='{self.name}')>"
 
@@ -160,58 +163,44 @@ class Vehicle(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # --- 關聯 (Relationships) ---
-    # 'documents' 屬性: 讓 Python 可以透過 vehicle.documents 存取這台車的所有文件
-    documents = relationship("VehicleDocument", back_populates="vehicle")
-    
-    # 'assets' 屬性: 讓 Python 可以透過 vehicle.assets 存取這台車的所有備品
-    assets = relationship("VehicleAsset", back_populates="vehicle")
+    # --- (!!! MODIFICATION HERE: 加入 cascade 和 passive_deletes) ---
+    documents = relationship("VehicleDocument", back_populates="vehicle", cascade="all, delete-orphan", passive_deletes=True)
+    assets = relationship("VehicleAsset", back_populates="vehicle", cascade="all, delete-orphan", passive_deletes=True)
+    maintenance_plans = relationship("MaintenancePlan", back_populates="vehicle", cascade="all, delete-orphan", passive_deletes=True)
+    work_orders = relationship("WorkOrder", back_populates="vehicle", cascade="all, delete-orphan", passive_deletes=True)
+    insurances = relationship("Insurance", back_populates="vehicle", cascade="all, delete-orphan", passive_deletes=True)
+    taxes_fees = relationship("TaxFee", back_populates="vehicle", cascade="all, delete-orphan", passive_deletes=True)
+    inspections = relationship("Inspection", back_populates="vehicle", cascade="all, delete-orphan", passive_deletes=True)
+    violations = relationship("Violation", back_populates="vehicle", cascade="all, delete-orphan", passive_deletes=True)
+    reservations = relationship("Reservation", back_populates="vehicle", cascade="all, delete-orphan", passive_deletes=True)
+    trips = relationship("Trip", back_populates="vehicle", cascade="all, delete-orphan", passive_deletes=True)
+    # -----------------------------------------------------------------
 
-    # --- 維護相關關聯 ---
-    maintenance_plans = relationship("MaintenancePlan", back_populates="vehicle")
-    work_orders = relationship("WorkOrder", back_populates="vehicle")
-    # --- 合規性相關關聯 ---
-    insurances = relationship("Insurance", back_populates="vehicle")
-    taxes_fees = relationship("TaxFee", back_populates="vehicle")
-    inspections = relationship("Inspection", back_populates="vehicle")
-    violations = relationship("Violation", back_populates="vehicle")
-
-    reservations = relationship("Reservation", back_populates="vehicle")
-    trips = relationship("Trip", back_populates="vehicle")
     def __repr__(self):
         return f"<Vehicle(plate_no='{self.plate_no}', type='{self.vehicle_type.name}')>"
 
 # --- 借車申請 ---
 class Reservation(Base):
-    """
-    5.2 借車申請 (reservations)
-    (本階段簡化：Reservation 即為 Assignment)
-    """
     __tablename__ = "reservations"
-
     id = Column(Integer, primary_key=True, index=True)
     
-    # 關聯到申請人 (員工)
-    requester_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="SET NULL") ---
+    # 這裡我們假設駕駛被刪除時，預約紀錄的申請人/駕駛可以被設為 NULL
+    requester_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True)
+    # -----------------------------------------------------------------
     
-    # 關聯到「被核准」的車輛 (一開始申請時可以是 null)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=True, index=True)
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="SET NULL") ---
+    # 這裡我們假設車輛被刪除時，預約紀錄的車輛可以被設為 NULL (或 "SET DEFAULT", "RESTRICT")
+    # 設為 SET NULL，表示保留預約紀錄，但車輛資訊遺失
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="SET NULL"), nullable=True, index=True)
+    # -----------------------------------------------------------------
     
     purpose = Column(Enum(ReservationPurposeEnum), nullable=False)
-    
-    # 規格書 4.2 偏好 (先用 Enum 簡化)
     vehicle_type_pref = Column(Enum(VehicleTypeEnum), nullable=True, comment="偏好車種")
-
     start_ts = Column(DateTime(timezone=True), nullable=False, index=True, comment="預計開始時間")
     end_ts = Column(DateTime(timezone=True), nullable=False, index=True, comment="預計結束時間")
-    
     status = Column(Enum(ReservationStatusEnum), default=ReservationStatusEnum.pending, nullable=False, index=True)
-    
-    # 規格書 4.2 目的地
     destination = Column(String(255), nullable=True, comment="目的地")
-    
-    # 規格書 5.2 (簡化，未來拆分 Assignment 時使用)
-    # bound_assets = Column(JSONB, nullable=True, comment="綁定的備品 (e.g., {'helmet_id': 1, 'lock_id': 2})")
-
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -219,40 +208,32 @@ class Reservation(Base):
     requester = relationship("Employee", back_populates="reservations_requested", foreign_keys=[requester_id])
     vehicle = relationship("Vehicle", back_populates="reservations")
     
-    # 關聯到還車時的行程回報 (一對一)
-    trip = relationship("Trip", back_populates="reservation", uselist=False)
-
+    # --- (!!! MODIFICATION HERE: 加入 cascade 和 passive_deletes) ---
+    trip = relationship("Trip", back_populates="reservation", uselist=False, cascade="all, delete-orphan", passive_deletes=True)
+    # -----------------------------------------------------------------
 
 # --- 行程回報 ---
 class Trip(Base):
-    """
-    5.3 行程回報 (trips)
-    """
     __tablename__ = "trips"
-    
     id = Column(Integer, primary_key=True, index=True)
     
-    # 關聯到哪一筆預約
-    reservation_id = Column(Integer, ForeignKey("reservations.id"), unique=True, nullable=False, index=True)
-    
-    # (反正規化) 儲存實際的車輛和駕駛
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
-    driver_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
-    
-    # 規格書 4.2 里程回報
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="CASCADE") ---
+    # 如果預約單被刪除，這筆行程回報也應該一起刪除
+    reservation_id = Column(Integer, ForeignKey("reservations.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    # -----------------------------------------------------------------
+
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="SET NULL") ---
+    # 假設車輛或駕駛被刪除時，行程紀錄可以保留，但關聯設為 NULL
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="SET NULL"), nullable=True, index=True)
+    driver_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True)
+    # -----------------------------------------------------------------
+
     odometer_start = Column(Integer, nullable=True, comment="出發里程數")
     odometer_end = Column(Integer, nullable=True, comment="歸還里程數")
-    
-    # 規格書 4.2 油耗/電量回報
     fuel_liters = Column(Numeric(10, 2), nullable=True, comment="加油公升數")
     charge_kwh = Column(Numeric(10, 2), nullable=True, comment="充電度數")
-    
-    # 規格書 4.2 上傳照片 (e.g., 還車儀表板)
     evidence_photo_url = Column(String(1024), nullable=True, comment="佐證照片 URL")
-
     notes = Column(Text, nullable=True, comment="行程備註 (e.g., 車輛有異音)")
-    
-    # 實際還車時間
     returned_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # --- 關聯 ---
@@ -262,30 +243,19 @@ class Trip(Base):
 
 # --- 車輛文件索引 ---
 class VehicleDocument(Base):
-    """
-    5.1 車輛文件索引 (vehicle_documents)
-    """
     __tablename__ = "vehicle_documents"
-    
     id = Column(Integer, primary_key=True, index=True)
     
-    # 關聯回 Vehicle 表的 id
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="CASCADE") ---
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    # -----------------------------------------------------------------
     
     doc_type = Column(Enum(DocumentTypeEnum), nullable=False, index=True)
-    
-    # file_url 存放檔案路徑或 S3 URL
-    # 規格書 4.4 提到目前尚未上雲，我們暫時可存放 Windows 網路芳鄰路徑 (e.g., \\server\share\file.pdf)
     file_url = Column(String(1024), nullable=False)
-    
-    # 規格書 3.3 要求的雜湊值，用於驗證檔案完整性
     sha256 = Column(String(64), nullable=True) 
-    
     issued_on = Column(Date, comment="文件核發日期 (e.g., 保單開始日)")
     expires_on = Column(Date, comment="文件到期日期 (e.g., 保單/行照到期日)")
-    
     tags = Column(String(255), nullable=True, comment="標籤 (e.g., '2024年強制險')")
-    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -298,29 +268,19 @@ class VehicleDocument(Base):
 
 # --- 車輛備品資產 ---
 class VehicleAsset(Base):
-    """
-    5.1 備品資產 (vehicle_assets)
-    """
     __tablename__ = "vehicle_assets"
-
     id = Column(Integer, primary_key=True, index=True)
     
-    # 關聯回 Vehicle 表的 id (表示這個備品 "屬於" 哪台車)
-    # 設為 nullable=True，允許安全帽等備品不綁定特定車輛 (共用庫)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=True, index=True)
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="SET NULL") ---
+    # 備品可以與車輛脫鉤，設為 SET NULL
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="SET NULL"), nullable=True, index=True)
+    # -----------------------------------------------------------------
     
     asset_type = Column(Enum(AssetTypeEnum), nullable=False, index=True)
-    
-    # 規格書 4.1 提到的編碼
     serial_no = Column(String(100), unique=True, index=True, comment="資產編號/序號")
-    
-    # 規格書 4.1 提到的有效期 (e.g., 安全帽建議 3 年更換)
     expires_on = Column(Date, nullable=True, comment="資產有效期/汰換日期")
-    
     status = Column(Enum(AssetStatusEnum), default=AssetStatusEnum.available, nullable=False)
-    
     notes = Column(Text, nullable=True, comment="備註 (e.g., 尺寸L, 顏色藍)")
-    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -332,98 +292,78 @@ class VehicleAsset(Base):
     
 # --- 供應商主檔 ---
 class Vendor(Base):
-    """
-    5.1 供應商 (vendors)
-    """
     __tablename__ = "vendors"
-    
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False, index=True)
     category = Column(Enum(VendorCategoryEnum), nullable=False, index=True)
     contact = Column(String(255), nullable=True, comment="聯絡人/電話/Email")
     notes = Column(Text, nullable=True)
-
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # --- 關聯 ---
-    work_orders = relationship("WorkOrder", back_populates="vendor")
+    # --- (!!! MODIFICATION HERE: 加入 cascade 和 passive_deletes) ---
+    # 如果供應商被刪除，工單/保險/檢驗 上的 vendor_id 應設為 NULL
+    work_orders = relationship("WorkOrder", back_populates="vendor", cascade="all, delete-orphan", passive_deletes=True)
+    insurances = relationship("Insurance", back_populates="insurer", cascade="all, delete-orphan", passive_deletes=True)
+    inspections = relationship("Inspection", back_populates="inspector", cascade="all, delete-orphan", passive_deletes=True)
+    # -----------------------------------------------------------------
 
     def __repr__(self):
         return f"<Vendor(name='{self.name}', category='{self.category.name}')>"
 
-
 # --- 保養計畫 ---
 class MaintenancePlan(Base):
-    """
-    5.3 保養計畫 (maintenance_plans)
-    """
     __tablename__ = "maintenance_plans"
-
     id = Column(Integer, primary_key=True, index=True)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
     
-    # 規格書 4.3 範例: '每 10,000 km 或 6 個月'
-    # 我們將其拆分為可計算的欄位
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="CASCADE") ---
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    # -----------------------------------------------------------------
     
     policy_name = Column(String(255), comment="計畫名稱 (e.g., 原廠定保, 換機油)")
-    
-    # 依里程
     interval_km = Column(Integer, nullable=True, comment="間隔公里數 (e.g., 5000)")
     next_due_odometer = Column(Integer, nullable=True, comment="下次到期里程數")
-    
-    # 依時間
     interval_months = Column(Integer, nullable=True, comment="間隔月數 (e.g., 6)")
     next_due_date = Column(Date, nullable=True, comment="下次到期日期")
-
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
-    # --- 關聯 ---
     vehicle = relationship("Vehicle", back_populates="maintenance_plans")
 
     def __repr__(self):
         return f"<MaintenancePlan(vehicle_id={self.vehicle_id}, policy='{self.policy_name}')>"
 
-
 # --- 維護工單 ---
 class WorkOrder(Base):
-    """
-    5.3 工單 (work_orders)
-    """
     __tablename__ = "work_orders"
-
     id = Column(Integer, primary_key=True, index=True)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
     
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="CASCADE") ---
+    # 這是錯誤 發生的欄位。
+    # 刪除車輛時，工單也應一併刪除。
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    # -----------------------------------------------------------------
+
     type = Column(Enum(WorkOrderTypeEnum), nullable=False, index=True)
     status = Column(Enum(WorkOrderStatusEnum), default=WorkOrderStatusEnum.draft, nullable=False, index=True)
     
-    # 關聯供應商
-    vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=True, index=True)
-    
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="SET NULL") ---
+    # 供應商刪除時，工單上的 vendor_id 設為 NULL
+    vendor_id = Column(Integer, ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True, index=True)
+    invoice_doc_id = Column(Integer, ForeignKey("vehicle_documents.id", ondelete="SET NULL"), nullable=True)
+    # -----------------------------------------------------------------
+
     scheduled_on = Column(Date, nullable=True, comment="預計執行日期")
     completed_on = Column(Date, nullable=True, comment="實際完成日期")
-    
-    # 規格書 15. 金額用 numeric(14,2)
     cost_amount = Column(Numeric(14, 2), nullable=True)
-    
-    # 關聯發票 (規格書 5.3)
-    invoice_doc_id = Column(Integer, ForeignKey("vehicle_documents.id"), nullable=True)
-    
     notes = Column(Text, nullable=True, comment="工單說明 (e.g., 更換煞車來令片)")
-    
-    # 紀錄當時的里程數
     odometer_at_service = Column(Integer, nullable=True)
-
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # --- 關聯 ---
     vehicle = relationship("Vehicle", back_populates="work_orders")
     vendor = relationship("Vendor", back_populates="work_orders")
-    
-    # 讓工單可以反查發票文件
     invoice_document = relationship("VehicleDocument")
 
     def __repr__(self):
@@ -431,180 +371,126 @@ class WorkOrder(Base):
     
 # --- 保險紀錄 ---
 class Insurance(Base):
-    """
-    5.4 保險 (insurances)
-    """
     __tablename__ = "insurances"
-    
     id = Column(Integer, primary_key=True, index=True)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
+    
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="CASCADE") ---
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    insurer_id = Column(Integer, ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True)
+    # -----------------------------------------------------------------
     
     policy_type = Column(Enum(InsurancePolicyTypeEnum), nullable=False)
     policy_no = Column(String(100), nullable=False, index=True, comment="保單號碼")
-    
-    # 關聯到 "vendors" 表 (category='insurance')
-    insurer_id = Column(Integer, ForeignKey("vendors.id"), nullable=True) 
-    
     coverage = Column(Text, nullable=True, comment="保額/承保範圍 (e.g., 第三人責任險 500/1000/50)")
-    
     effective_on = Column(Date, nullable=False, comment="保單生效日")
     expires_on = Column(Date, nullable=False, index=True, comment="保單到期日")
-    
     premium = Column(Numeric(14, 2), nullable=True, comment="保費")
-
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
-    # --- 關聯 ---
     vehicle = relationship("Vehicle", back_populates="insurances")
-    insurer = relationship("Vendor") # 關聯到供應商 (保險公司)
+    insurer = relationship("Vendor", back_populates="insurances")
 
 
 # --- 稅費紀錄 ---
 class TaxFee(Base):
-    """
-    5.4 稅費 (taxes_fees)
-    """
     __tablename__ = "taxes_fees"
-
     id = Column(Integer, primary_key=True, index=True)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
+
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="CASCADE") ---
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    evidence_doc_id = Column(Integer, ForeignKey("vehicle_documents.id", ondelete="SET NULL"), nullable=True)
+    # -----------------------------------------------------------------
 
     fee_type = Column(Enum(FeeTypeEnum), nullable=False, index=True)
-    
     period_start = Column(Date, nullable=False, comment="費用區間 (起)")
     period_end = Column(Date, nullable=False, comment="費用區間 (迄)")
-    
     amount = Column(Numeric(14, 2), nullable=False)
     paid_on = Column(Date, nullable=True, index=True, comment="繳費日期")
-    
-    # 關聯到繳費憑證 (e.g., 繳費收據 PDF)
-    evidence_doc_id = Column(Integer, ForeignKey("vehicle_documents.id"), nullable=True)
-
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
-    # --- 關聯 ---
     vehicle = relationship("Vehicle", back_populates="taxes_fees")
     evidence_document = relationship("VehicleDocument")
 
 
 # --- 檢驗紀錄 ---
 class Inspection(Base):
-    """
-    5.4 檢驗 (inspections)
-    """
     __tablename__ = "inspections"
-
     id = Column(Integer, primary_key=True, index=True)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
+    
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="CASCADE") ---
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    inspector_id = Column(Integer, ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True)
+    cert_doc_id = Column(Integer, ForeignKey("vehicle_documents.id", ondelete="SET NULL"), nullable=True)
+    # -----------------------------------------------------------------
     
     inspection_type = Column(Enum(InspectionTypeEnum), nullable=False, index=True)
     result = Column(Enum(InspectionResultEnum), default=InspectionResultEnum.pending)
-    
     inspection_date = Column(Date, nullable=True, comment="實際檢驗日期")
     next_due_date = Column(Date, nullable=True, index=True, comment="下次應檢驗日期")
-    
-    # 關聯到檢驗站 (vendors 表)
-    inspector_id = Column(Integer, ForeignKey("vendors.id"), nullable=True) 
-    
-    # 關聯到合格證
-    cert_doc_id = Column(Integer, ForeignKey("vehicle_documents.id"), nullable=True)
-
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # --- 關聯 ---
     vehicle = relationship("Vehicle", back_populates="inspections")
-    inspector = relationship("Vendor") # 關聯到供應商 (檢驗站)
+    inspector = relationship("Vendor", back_populates="inspections")
     certificate_document = relationship("VehicleDocument")
 
 
 # --- 違規紀錄 ---
 class Violation(Base):
-    """
-    5.4 違規 (violations)
-    """
     __tablename__ = "violations"
-
     id = Column(Integer, primary_key=True, index=True)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
     
-    # 規格書 4.5: 指派責任人
-    driver_id = Column(Integer, ForeignKey("employees.id"), nullable=True, index=True)
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="CASCADE" / "SET NULL") ---
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    driver_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True)
+    ticket_doc_id = Column(Integer, ForeignKey("vehicle_documents.id", ondelete="SET NULL"), nullable=True)
+    # -----------------------------------------------------------------
     
     law_ref = Column(String(255), nullable=True, comment="違反法條 (e.g., 道路交通管理處罰條例 第56條1項)")
     violation_date = Column(DateTime(timezone=True), nullable=False, comment="違規時間")
-    
     amount = Column(Numeric(14, 2), nullable=False, comment="罰款金額")
-    
-    # 規格書 4.5: 駕駛積點
     points = Column(Integer, default=0, comment="駕駛積點")
-    
     paid_on = Column(Date, nullable=True, comment="繳費日期")
-    
-    # 關聯到罰單影像
-    ticket_doc_id = Column(Integer, ForeignKey("vehicle_documents.id"), nullable=True)
-    
     status = Column(Enum(ViolationStatusEnum), default=ViolationStatusEnum.open, index=True)
-
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # --- 關聯 ---
     vehicle = relationship("Vehicle", back_populates="violations")
-    driver = relationship("Employee", back_populates="violations") # 關聯到駕駛 (員工)
+    driver = relationship("Employee", back_populates="violations")
     ticket_document = relationship("VehicleDocument")
 
 # --- 不可竄改稽核軌跡 ---
 class AuditLog(Base):
-    """
-    5.5 不可竄改稽核軌跡 (audit_logs)
-    記錄 CUD (Create, Update, Delete) 操作
-    """
     __tablename__ = "audit_logs"
-
     id = Column(Integer, primary_key=True, index=True)
     
-    # 規格書 5.5: actor_id (誰做的)
-    # nullable=True 允許系統自動觸發 (e.g., 排程) 或在驗證前
-    actor_id = Column(Integer, ForeignKey("employees.id"), nullable=True, index=True)
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="SET NULL") ---
+    actor_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True)
+    # -----------------------------------------------------------------
     
     ts = Column(DateTime(timezone=True), server_default=func.now(), index=True, comment="操作時間")
-    
-    # 規格書 5.5: action, entity, entity_id
     action = Column(String(50), nullable=False, index=True, comment="動作 (e.g., CREATE, UPDATE, DELETE)")
     entity = Column(String(100), nullable=False, index=True, comment="實體 (e.g., Vehicle, Violation)")
     entity_id = Column(Integer, nullable=False, index=True, comment="實體 ID")
-    
-    # 規格書 5.5: 雜湊值 (我們先簡化，儲存 JSON)
     old_value = Column(JSONB, nullable=True, comment="舊值 (JSON)")
     new_value = Column(JSONB, nullable=True, comment="新值 (JSON)")
-    
-    # 規格書 5.5: ip, ua (User-Agent)
     ip_address = Column(String(100), nullable=True)
     user_agent = Column(String(512), nullable=True)
 
-    # --- 關聯 ---
     actor = relationship("Employee")
 
 
 # --- 敏感資料存取紀錄 ---
 class PrivacyAccessLog(Base):
-    """
-    5.5 敏感資料存取紀錄 (privacy_access_logs)
-    記錄 R (Read) 操作
-    """
     __tablename__ = "privacy_access_logs"
-    
     id = Column(Integer, primary_key=True, index=True)
     
-    actor_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
-    ts = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    # --- (!!! MODIFICATION HERE: 加入 ondelete="SET NULL") ---
+    actor_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True)
+    # -----------------------------------------------------------------
     
-    # 規格書 5.5: resource, resource_id
+    ts = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     resource = Column(String(255), nullable=False, index=True, comment="存取的資源 (e.g., Employee.license_class)")
     resource_id = Column(Integer, nullable=False, index=True, comment="資源 ID")
-    
     reason = Column(Text, nullable=True, comment="存取原因 (e.g., 稽核罰單)")
-    
     ip_address = Column(String(100), nullable=True)
 
-    # --- 關聯 ---
     actor = relationship("Employee")

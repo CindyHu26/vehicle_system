@@ -107,16 +107,16 @@ export interface Vehicle {
   vin?: string;
   make: string;
   model: string;
-  year: number;
-  powertrain?: string;
-  displacement_cc: number;
-  seats: number;
+  year?: number | null; // 確保允許 null
+  powertrain?: string | null;
+  displacement_cc?: number | null;
+  seats?: number | null;
   vehicle_type: 'car' | 'motorcycle' | 'van' | 'truck' | 'ev_scooter' | 'other';
   status: 'active' | 'maintenance' | 'idle' | 'retired';
   created_at: string;
 
-  updated_at?: string;
-  acquired_on?: string; 
+  updated_at?: string | null;
+  acquired_on?: string | null;
   helmet_required: boolean;
 
   // 關聯欄位
@@ -130,7 +130,6 @@ export interface Vehicle {
   taxes_fees: TaxFee[];
   reservations: Reservation[];
   trips: Trip[];
-  // --------------------------------
 }
 
 export interface VehicleDocument {
