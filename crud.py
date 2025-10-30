@@ -30,8 +30,11 @@ def get_employees(db: Session, skip: int = 0, limit: int = 100):
         subqueryload(models.Employee.reservations_requested),
         subqueryload(models.Employee.trips_driven)
     ).offset(skip).limit(limit).all()
+
 def create_employee(db: Session, employee: schemas.EmployeeCreate):
-    db_employee = models.Employee(**employee.model_dump())
+    # 使用 model_dump() 確保 List[str] 被正確序列化為 JSON ***
+    employee_data = employee.model_dump()
+    db_employee = models.Employee(**employee_data)
     db.add(db_employee)
     db.commit()
     db.refresh(db_employee)
@@ -51,9 +54,10 @@ def update_employee(
     old_employee_data = deepcopy(db_employee)
 
     # 將 Pydantic schema 中的資料更新到 SQLAlchemy model instance
-    update_data = employee_update.model_dump(exclude_unset=True)
+    update_data = employee_update.model_dump(exclude_unset=True) # 只拿有傳入的欄位
+    
     for key, value in update_data.items():
-        setattr(db_employee, key, value)
+        setattr(db_employee, key, value) # value 會是 List[str]，JSONB 會自動處理
 
     db.add(db_employee) # 將變更加入 session
 

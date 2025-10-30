@@ -10,7 +10,6 @@ from sqlalchemy.dialects.postgresql import JSONB
 from database import Base
 
 # --- 列舉 (Enum) 定義 ---
-# ... (所有 Enum 保持不變) ...
 class VehicleTypeEnum(enum.Enum):
     car = "car"
     motorcycle = "motorcycle"
@@ -128,7 +127,7 @@ class Employee(Base):
     emp_no = Column(String(50), unique=True, nullable=False, index=True)
     name = Column(String(100), nullable=False)
     dept_name = Column(String(100)) 
-    license_class = Column(String(255), comment="駕照等級, e.g., '普通小型車,普通重型機車'")
+    license_class = Column(JSONB, nullable=True, comment="駕照等級 (儲存為 JSON 陣列)")
     status = Column(Enum(EmployeeStatusEnum), default=EmployeeStatusEnum.active, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

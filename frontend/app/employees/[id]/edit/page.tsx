@@ -7,18 +7,26 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useParams } from 'next/navigation';
-import { apiClient, Employee } from '@/lib/api'; // 從 api.ts 匯入 Employee 型別
+import { apiClient, Employee } from '@/lib/api';
 import { useEffect } from 'react';
 
-// 1. Zod Schema (對應後端的 EmployeeUpdate)
+// 定義駕照選項 (與 new/page.tsx 相同)
+const licenseOptions = [
+  '普通小型車',
+  '普通重型機車',
+  '大型重型機車',
+  '職業小型車',
+  '職業大貨車',
+  '職業大客車',
+];
+
+// 1. Zod Schema
 const employeeUpdateSchema = z.object({
   emp_no: z.string(), // 員工編號 (唯讀)
   name: z.string().min(1, '姓名稱為必填'),
   dept_name: z.string().optional().nullable(),
-  license_class: z.string().optional().nullable(),
-  status: z.enum(['active', 'inactive'], {
-    errorMap: () => ({ message: '請選擇有效狀態' })
-  }),
+  license_class: z.array(z.string()).optional(), // *** 修改為 array ***
+  status: z.enum(['active', 'inactive']),
 });
 
 type EmployeeUpdateFormData = z.infer<typeof employeeUpdateSchema>;
@@ -33,7 +41,7 @@ export default function EditEmployeePage() {
   const { data: employee, isLoading: isLoadingEmployee, isError } = useQuery<Employee>({
     queryKey: ['employee', employeeId],
     queryFn: () => apiClient.getEmployee(employeeId).then(res => res.data),
-    enabled: !!employeeId, // 只有 employeeId 有效時才執行
+    enabled: !!employeeId,
   });
 
   // 3. 設定 react-hook-form
@@ -44,7 +52,9 @@ export default function EditEmployeePage() {
     reset,
   } = useForm<EmployeeUpdateFormData>({
     resolver: zodResolver(employeeUpdateSchema),
-    defaultValues: {}, // 初始為空，稍後用 useEffect 填入
+    defaultValues: {
+        license_class: [], // 預設空陣列
+    },
   });
 
   // 4. 當資料載入後，設定表單預設值
@@ -54,30 +64,29 @@ export default function EditEmployeePage() {
         emp_no: employee.emp_no,
         name: employee.name,
         dept_name: employee.dept_name ?? '',
-        license_class: employee.license_class ?? '',
+        // *** 修改：後端傳來的是陣列或 null ***
+        license_class: employee.license_class ?? [],
         status: employee.status,
       });
     }
   }, [employee, reset]);
 
-  // 5. 設定 react-query mutation (更新 API)
+  // 5. 設定更新 Mutation
   const updateMutation = useMutation({
     mutationFn: (data: EmployeeUpdateFormData) => {
-        // 排除 emp_no，因為它不應該被更新
         const { emp_no, ...updateData } = data;
         const payload = {
             ...updateData,
-            // 將空字串轉為 null
             dept_name: updateData.dept_name || null,
-            license_class: updateData.license_class || null,
+            // *** 修改：傳送陣列或 null ***
+            license_class: updateData.license_class && updateData.license_class.length > 0 ? updateData.license_class : null,
         };
-        // *** 假設 apiClient 有 updateEmployee 方法 ***
         return apiClient.updateEmployee(employeeId, payload); 
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['employees'] }); // 更新列表快取
-      queryClient.invalidateQueries({ queryKey: ['employee', employeeId] }); // 更新此員工快取
-      router.push('/employees'); // 導回列表頁
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      queryClient.invalidateQueries({ queryKey: ['employee', employeeId] });
+      router.push('/employees');
       alert('員工資料更新成功！');
     },
     onError: (error: any) => {
@@ -89,10 +98,7 @@ export default function EditEmployeePage() {
 
   // 6. 設定刪除 Mutation
   const deleteMutation = useMutation({
-    mutationFn: () => {
-        // *** 假設 apiClient 有 deleteEmployee 方法 ***
-        return apiClient.deleteEmployee(employeeId); 
-    },
+    mutationFn: () => apiClient.deleteEmployee(employeeId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
       router.push('/employees');
@@ -105,7 +111,6 @@ export default function EditEmployeePage() {
     },
   });
 
-  // 7. 表單提交處理
   const onSubmit = (data: EmployeeUpdateFormData) => {
     updateMutation.mutate(data);
   };
@@ -116,7 +121,6 @@ export default function EditEmployeePage() {
     }
   };
 
-  // 狀態選項
   const statusOptions = [
     { value: 'active', label: '在職' },
     { value: 'inactive', label: '離職' },
@@ -180,19 +184,26 @@ export default function EditEmployeePage() {
             />
           </div>
 
-          {/* 駕照等級 (選填) */}
+          {/* --- (!!! 修改駕照等級為 Checkbox !!!) --- */}
           <div>
-            <label htmlFor="license_class" className="block text-sm font-medium text-gray-700">
-              駕照等級 (選填)
+            <label className="block text-sm font-medium text-gray-700">
+              駕照等級 (可複選)
             </label>
-            <input
-              type="text"
-              id="license_class"
-              {...register('license_class')}
-              placeholder="普通小型車, 普通重型機車"
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-            />
+            <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-2">
+              {licenseOptions.map((license) => (
+                <label key={license} className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    value={license}
+                    {...register('license_class')}
+                    className="rounded border-gray-300 text-primary-600 shadow-sm focus:ring-primary-500"
+                  />
+                  <span className="text-sm">{license}</span>
+                </label>
+              ))}
+            </div>
           </div>
+          {/* ------------------------------------- */}
 
           {/* 狀態 (必填) */}
           <div>
@@ -215,9 +226,8 @@ export default function EditEmployeePage() {
 
           {/* 操作按鈕 */}
           <div className="flex justify-between items-center pt-4">
-             {/* 刪除按鈕 */}
              <button
-              type="button" // 必須是 type="button"
+              type="button"
               onClick={handleDelete}
               disabled={deleteMutation.isPending}
               className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
@@ -225,7 +235,6 @@ export default function EditEmployeePage() {
               {deleteMutation.isPending ? '刪除中...' : '刪除員工'}
             </button>
              
-             {/* 更新按鈕 */}
             <button
               type="submit"
               disabled={updateMutation.isPending}

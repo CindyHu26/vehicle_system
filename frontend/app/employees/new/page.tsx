@@ -9,12 +9,24 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api';
 
-// 1. 定義 Zod Schema (對應後端的 EmployeeCreate)
+// 定義駕照選項
+const licenseOptions = [
+  '普通小型車',
+  '普通重型機車',
+  '大型重型機車',
+  '職業小型車',
+  '職業大貨車',
+  '職業大客車',
+];
+
+// 1. 定義 Zod Schema
 const employeeSchema = z.object({
   emp_no: z.string().min(1, '員工編號為必填'),
   name: z.string().min(1, '姓名稱為必填'),
   dept_name: z.string().optional().nullable(),
-  license_class: z.string().optional().nullable(),
+  // --- (!!! 修改此行 !!!) ---
+  license_class: z.array(z.string()).optional(), // 改為 string 陣列
+  // --------------------------
   status: z.enum(['active', 'inactive'], {
     errorMap: () => ({ message: '請選擇有效狀態' })
   }),
@@ -34,38 +46,37 @@ export default function NewEmployeePage() {
   } = useForm<EmployeeFormData>({
     resolver: zodResolver(employeeSchema),
     defaultValues: {
-      status: 'active', // 預設狀態為 active
+      status: 'active',
+      license_class: [], // 預設為空陣列
     },
   });
 
-  // 3. 設定 react-query mutation (處理 API 呼叫)
+  // 3. 設定 react-query mutation
   const mutation = useMutation({
     mutationFn: (data: EmployeeFormData) => {
         const payload = {
             ...data,
-            // 確保 optional 欄位送出 null 而不是 undefined 或空字串
             dept_name: data.dept_name || null,
-            license_class: data.license_class || null,
+            // license_class 現在直接是陣列，後端 JSONB 可以接收
+            license_class: data.license_class && data.license_class.length > 0 ? data.license_class : null,
         };
-        return apiClient.createEmployee(payload); // 呼叫 API
+        return apiClient.createEmployee(payload);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['employees'] }); // 讓員工列表快取失效
-      router.push('/employees'); // 導回列表頁
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      router.push('/employees');
     },
     onError: (error: any) => {
       console.error("新增員工失敗:", error);
       const errorMsg = error.response?.data?.detail || error.message;
-      alert(`新增失敗: ${errorMsg}`); // 顯示後端錯誤
+      alert(`新增失敗: ${errorMsg}`);
     },
   });
 
-  // 4. 表單提交處理函式
   const onSubmit = (data: EmployeeFormData) => {
     mutation.mutate(data);
   };
 
-  // 狀態選項
   const statusOptions = [
     { value: 'active', label: '在職' },
     { value: 'inactive', label: '離職' },
@@ -80,7 +91,6 @@ export default function NewEmployeePage() {
         </Link>
       </div>
 
-      {/* 5. 建立表單 */}
       <div className="bg-white rounded-lg shadow p-8">
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
           
@@ -129,19 +139,26 @@ export default function NewEmployeePage() {
             />
           </div>
 
-          {/* 駕照等級 (選填) */}
+          {/* --- (!!! 修改駕照等級為 Checkbox !!!) --- */}
           <div>
-            <label htmlFor="license_class" className="block text-sm font-medium text-gray-700">
-              駕照等級 (選填，例如: 普通小型車, 普通重型機車)
+            <label className="block text-sm font-medium text-gray-700">
+              駕照等級 (可複選)
             </label>
-            <input
-              type="text"
-              id="license_class"
-              {...register('license_class')}
-              placeholder="普通小型車, 普通重型機車"
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-            />
+            <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-2">
+              {licenseOptions.map((license) => (
+                <label key={license} className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    value={license}
+                    {...register('license_class')} // react-hook-form 會自動處理陣列
+                    className="rounded border-gray-300 text-primary-600 shadow-sm focus:ring-primary-500"
+                  />
+                  <span className="text-sm">{license}</span>
+                </label>
+              ))}
+            </div>
           </div>
+          {/* ------------------------------------- */}
 
           {/* 狀態 (必填) */}
           <div>

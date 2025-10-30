@@ -127,7 +127,7 @@ def update_employee_api(
         return crud.get_employee(db, employee_id=employee_id)
 
     except Exception as e:
-        db.rollback()
+        # db.rollback() # crud 層會處理 rollback
         raise HTTPException(status_code=500, detail=f"更新失敗: {e}")
 
 @app.delete("/api/v1/employees/{employee_id}",

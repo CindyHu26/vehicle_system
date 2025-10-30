@@ -97,7 +97,7 @@ class EmployeeBase(BaseModel):
     emp_no: str
     name: str
     dept_name: str | None = None
-    license_class: str | None = None
+    license_class: List[str] | None = None
     status: EmployeeStatusEnum = EmployeeStatusEnum.active
 
 class EmployeeCreate(EmployeeBase):

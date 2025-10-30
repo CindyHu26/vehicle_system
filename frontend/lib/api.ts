@@ -80,7 +80,7 @@ export interface Employee {
   emp_no: string;
   name: string;
   dept_name?: string;
-  license_class?: string;
+  license_class?: string[] | null;
   status: 'active' | 'inactive';
   created_at: string;
 }
@@ -88,7 +88,7 @@ export interface Employee {
 export interface EmployeeUpdatePayload {
   name?: string | null;
   dept_name?: string | null;
-  license_class?: string | null;
+  license_class?: string[] | null;
   status?: 'active' | 'inactive';
 }
 
@@ -270,7 +270,7 @@ export const apiClient = {
   createEmployee: (data: any) => api.post<Employee>('/api/v1/employees/', data),
   updateEmployee: (id: number, data: EmployeeUpdatePayload) => api.put<Employee>(`/api/v1/employees/${id}`, data),
   deleteEmployee: (id: number) => api.delete<Employee>(`/api/v1/employees/${id}`),
-  
+
   // Vehicles
   getVehicles: () => api.get<Vehicle[]>('/api/v1/vehicles/'),
   getVehicle: (id: number) => api.get<Vehicle>(`/api/v1/vehicles/${id}`),
